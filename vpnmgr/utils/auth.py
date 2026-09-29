@@ -16,11 +16,24 @@ security = HTTPBearer(auto_error=False)
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     """Verify a plain password against hashed"""
+    if not hashed_password or not plain_password:
+        return False
+    # 1. Bcrypt hash format
+    if hashed_password.startswith(("$2a$", "$2b$", "$2y$")):
+        try:
+            import bcrypt
+            return bcrypt.checkpw(plain_password.encode("utf-8"), hashed_password.encode("utf-8"))
+        except Exception:
+            pass
+    # 2. SHA256 hex format (used by legacy user creation)
+    if len(hashed_password) == 64 and all(c in "0123456789abcdefABCDEF" for c in hashed_password):
+        import hashlib
+        return hashlib.sha256(plain_password.encode()).hexdigest().lower() == hashed_password.lower()
+    # 3. Fallback to passlib pwd_context
     try:
-        import bcrypt
-        return bcrypt.checkpw(plain_password.encode("utf-8"), hashed_password.encode("utf-8"))
-    except Exception:
         return pwd_context.verify(plain_password, hashed_password)
+    except Exception:
+        return False
 
 
 def get_password_hash(password: str) -> str:

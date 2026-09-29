@@ -531,9 +531,35 @@ async def debug_page(request: Request, user: str = Depends(require_auth)):
 # ========== API Routes - Auth ==========
 
 @app.post("/api/auth/login")
-async def api_login(request: Request, data: LoginRequest):
-    """Login API"""
-    if not check_admin_auth(data.username, data.password):
+async def api_login(
+    request: Request,
+    data: LoginRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    """Login API - authenticate against database system_users, with fallback to settings"""
+    authenticated = False
+    
+    # 1. 优先查询数据库 system_users 表并校验密码
+    try:
+        result = await db.execute(
+            select(SystemUser).where(
+                SystemUser.username == data.username,
+                SystemUser.is_active == True
+            )
+        )
+        user = result.scalar_one_or_none()
+        if user and verify_password(data.password, user.password_hash):
+            authenticated = True
+            user.last_login_at = datetime.now(timezone(timedelta(hours=8)))
+            await db.commit()
+    except Exception as e:
+        print(f"[AUTH] Database auth check error: {e}")
+    
+    # 2. 回退检查环境变量中的 admin 账号密码
+    if not authenticated and check_admin_auth(data.username, data.password):
+        authenticated = True
+
+    if not authenticated:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid credentials"
