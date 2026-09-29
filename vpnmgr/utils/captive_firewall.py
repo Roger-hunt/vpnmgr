@@ -56,7 +56,10 @@ def init_captive_firewall():
     # Allow ICMP ping to portal host for diagnostic
     run_container_iptables(["-A", CHAIN_NAME, "-p", "icmp", "-d", HOST_IP, "-j", "ACCEPT"])
     
-    # Drop all other outbound traffic for unauthenticated clients
+    # REJECT TCP connections (HTTPS etc.) with tcp-reset so browsers fail fast
+    # instead of hanging on timeout for 30+ seconds with DROP
+    run_container_iptables(["-A", CHAIN_NAME, "-p", "tcp", "-j", "REJECT", "--reject-with", "tcp-reset"])
+    # DROP everything else (UDP non-DNS, etc.) as final catch-all
     run_container_iptables(["-A", CHAIN_NAME, "-j", "DROP"])
     
     # 4. Remove all existing blanket ACCEPT and existing CAPTIVE_AUTH jumps from FORWARD
