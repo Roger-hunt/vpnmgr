@@ -260,6 +260,8 @@
 
             // Welcome page
             'login.footerBrand': 'VPN Manager',
+            'login.orDivider': '或通过以下方式登录',
+            'login.ssoLogin': '通过 SSO 单点登录',
             'welcome.brandTitle': 'VPN Manager',
             'welcome.title': '欢迎 - VPN Manager',
             'welcome.connStatus': '连接状态',
@@ -531,6 +533,8 @@
 
             // Welcome page
             'login.footerBrand': 'VPN Manager',
+            'login.orDivider': 'Or sign in with',
+            'login.ssoLogin': 'Sign in with SSO',
             'welcome.brandTitle': 'VPN Manager',
             'welcome.title': 'Welcome - VPN Manager',
             'welcome.connStatus': 'Connection Status',

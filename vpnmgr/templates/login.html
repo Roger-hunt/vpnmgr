@@ -244,6 +244,69 @@
             pointer-events: none;
         }
 
+        .sso-section {
+            margin-top: 20px;
+        }
+
+        .sso-divider {
+            display: flex;
+            align-items: center;
+            text-align: center;
+            margin: 20px 0 16px 0;
+            color: var(--gray-400);
+            font-size: 0.8125rem;
+        }
+
+        .sso-divider::before,
+        .sso-divider::after {
+            content: '';
+            flex: 1;
+            border-bottom: 1px solid var(--gray-200);
+        }
+
+        .sso-divider span {
+            padding: 0 12px;
+            font-weight: 500;
+        }
+
+        .btn-sso {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            width: 100%;
+            padding: 13px 20px;
+            border: 1.5px solid var(--gray-300);
+            background: #ffffff;
+            color: var(--gray-700);
+            border-radius: var(--radius);
+            font-size: 0.9375rem;
+            font-weight: 600;
+            text-decoration: none;
+            cursor: pointer;
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+        }
+
+        .btn-sso:hover {
+            background: #f8fafc;
+            border-color: var(--primary-500);
+            color: var(--primary-600);
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(37, 99, 235, 0.12);
+        }
+
+        .btn-sso:active {
+            transform: translateY(0);
+        }
+
+        .sso-icon {
+            width: 18px;
+            height: 18px;
+            stroke: currentColor;
+            flex-shrink: 0;
+        }
+
         .toast {
             background: white;
             border-radius: var(--radius);
@@ -413,6 +476,20 @@
                 <button type="submit" class="btn" id="login-btn">
                     <span data-i18n="login.signIn">登录</span>
                 </button>
+
+                <div id="sso-section" class="sso-section" style="display: none;">
+                    <div class="sso-divider">
+                        <span data-i18n="login.orDivider">或通过以下方式登录</span>
+                    </div>
+                    <a href="/api/auth/sso/login" class="btn-sso" id="sso-btn">
+                        <svg class="sso-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/>
+                            <polyline points="10 17 15 12 10 7"/>
+                            <line x1="15" y1="12" x2="3" y2="12"/>
+                        </svg>
+                        <span id="sso-btn-text" data-i18n="login.ssoLogin">通过 SSO 单点登录</span>
+                    </a>
+                </div>
             </form>
 
             <div class="login-footer" data-i18n="login.footerBrand">
@@ -441,6 +518,36 @@
                 toast.style.transform = 'translateY(-20px)';
                 setTimeout(() => toast.remove(), 300);
             }, 3000);
+        }
+
+        // Check if SSO / OIDC is enabled
+        fetch('/api/auth/sso/config')
+            .then(res => res.json())
+            .then(data => {
+                if (data && data.enabled) {
+                    const ssoSection = document.getElementById('sso-section');
+                    const ssoBtnText = document.getElementById('sso-btn-text');
+                    if (ssoSection) ssoSection.style.display = 'block';
+                    if (ssoBtnText && data.provider_name) {
+                        ssoBtnText.textContent = data.provider_name;
+                    }
+                }
+            })
+            .catch(() => {});
+
+        // Check for URL error params (e.g. from SSO callback)
+        const urlParams = new URLSearchParams(window.location.search);
+        const ssoError = urlParams.get('error');
+        if (ssoError) {
+            const errorMap = {
+                'invalid_state': 'SSO 认证状态已过期，请重试',
+                'missing_code': 'SSO 授权失败：未收到授权码',
+                'token_exchange_failed': 'SSO 换取令牌失败，请检查配置',
+                'user_not_authorized': '未在本地系统授权该 SSO 账号',
+                'sso_disabled': 'SSO 单点登录未启用',
+                'sso_failed': 'SSO 登录失败，请重试或联系管理员'
+            };
+            showToast(errorMap[ssoError] || `SSO 登录失败: ${ssoError}`, 'error');
         }
 
         document.getElementById('login-form').addEventListener('submit', async (e) => {

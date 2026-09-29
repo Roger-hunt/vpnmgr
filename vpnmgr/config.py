@@ -34,6 +34,20 @@ class Settings(BaseSettings):
     # VPN env file path (optional)
     vpn_env_file: str = ""
     
+    # OIDC / SSO Configuration
+    oidc_enabled: bool = False
+    oidc_issuer_url: str = ""        # e.g., https://sso.example.com
+    oidc_client_id: str = ""         # Client ID
+    oidc_client_secret: str = ""     # Client Secret
+    oidc_redirect_uri: str = ""      # e.g., http://<host>:8080/api/auth/sso/callback
+    oidc_scopes: str = "openid profile email"
+    oidc_provider_name: str = "SSO 单点登录"
+    oidc_auto_create_user: bool = True  # Automatically provision user on first login
+
+    @property
+    def is_oidc_active(self) -> bool:
+        return self.oidc_enabled or bool(self.oidc_issuer_url and self.oidc_client_id)
+    
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"

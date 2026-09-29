@@ -59,6 +59,28 @@ async def get_db():
 
 
 async def init_db():
-    """Initialize database tables"""
+    """Initialize database tables and run lightweight migrations"""
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        
+        # Check and add OIDC columns to system_users if missing
+        def migrate_system_users(connection):
+            from sqlalchemy import inspect, text
+            inspector = inspect(connection)
+            if "system_users" in inspector.get_table_names():
+                cols = [col["name"] for col in inspector.get_columns("system_users")]
+                if "auth_provider" not in cols:
+                    try:
+                        connection.execute(text("ALTER TABLE system_users ADD COLUMN auth_provider VARCHAR(50) DEFAULT 'local'"))
+                        logger.info("Migrated system_users: added auth_provider column")
+                    except Exception as e:
+                        logger.warning("Could not add auth_provider column: %s", e)
+                if "oidc_sub" not in cols:
+                    try:
+                        connection.execute(text("ALTER TABLE system_users ADD COLUMN oidc_sub VARCHAR(255)"))
+                        connection.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ix_system_users_oidc_sub ON system_users (oidc_sub)"))
+                        logger.info("Migrated system_users: added oidc_sub column and index")
+                    except Exception as e:
+                        logger.warning("Could not add oidc_sub column: %s", e)
+        
+        await conn.run_sync(migrate_system_users)

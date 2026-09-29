@@ -4,6 +4,15 @@ VPN Manager - FastAPI Application
 import os
 import time
 import ipaddress
+import secrets
+import hashlib
+import base64
+from urllib.parse import urlencode
+import httpx
+try:
+    from jose import jwt
+except ImportError:
+    jwt = None
 import asyncio
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone, timedelta
@@ -508,27 +517,83 @@ async def render_welcome_page(request: Request) -> HTMLResponse:
         })
 
 
+def get_captive_redirect_url(request: Request) -> str:
+    """Build redirect URL for captive portal, preserving host header if present."""
+    host = request.headers.get("Host", "").strip()
+    if host:
+        return f"http://{host}/welcome"
+    return "/welcome"
+
+
 # Known OS captive probe domains (matching probe requests hitting root '/')
 APPLE_PROBE_HOSTS = {
     "captive.apple.com", "www.apple.com", "appleiphonecell.com",
     "ibook.info", "itools.info", "airport.us", "thinkdifferent.us"
 }
+
+# Android & domestic Chinese vendor probe hosts (Vivo, Xiaomi, Huawei, Oppo, etc.)
 ANDROID_PROBE_HOSTS = {
+    # AOSP / Google
     "connectivitycheck.gstatic.com", "www.google.com", "play.googleapis.com",
-    "connectivitycheck.android.com", "clients3.google.com"
+    "connectivitycheck.android.com", "clients3.google.com", "google.cn", "g.cn",
+    # Vivo
+    "wifi.vivo.com.cn", "devel.vivo.com.cn",
+    # Xiaomi / Redmi
+    "connect.rom.miui.com",
+    # Huawei / Honor
+    "connectivitycheck.platform.hicloud.com", "connectivity.hihonor.com",
+    # Oppo / Realme / OnePlus
+    "captive.oppomobile.com", "connectivity.coloros.com",
+    # Meizu / Others
+    "connectivitycheck.flyme.cn", "captiveportal.baidu.com", "wifi.qq.com"
 }
+
 WINDOWS_PROBE_HOSTS = {
     "www.msftconnecttest.com", "msftconnecttest.com", "www.msftncsi.com", "msftncsi.com",
     "ipv6.msftconnecttest.com"
 }
+
 LINUX_PROBE_HOSTS = {
     "detectportal.firefox.com", "nmcheck.gnome.org"
 }
 
 
+def is_android_probe_host(host: str) -> bool:
+    if not host:
+        return False
+    if host in ANDROID_PROBE_HOSTS:
+        return True
+    return any(host.endswith(suffix) for suffix in (
+        ".vivo.com.cn", ".miui.com", ".hicloud.com", ".hihonor.com",
+        ".oppomobile.com", ".coloros.com", ".flyme.cn", ".gstatic.com", ".android.com"
+    ))
+
+
+def is_apple_probe_host(host: str) -> bool:
+    if not host:
+        return False
+    if host in APPLE_PROBE_HOSTS:
+        return True
+    return any(host.endswith(suffix) for suffix in (
+        ".apple.com", "airport.us", "thinkdifferent.us", "ibook.info", "itools.info"
+    ))
+
+
+def is_windows_probe_host(host: str) -> bool:
+    if not host:
+        return False
+    if host in WINDOWS_PROBE_HOSTS:
+        return True
+    return any(host.endswith(suffix) for suffix in (".msftconnecttest.com", ".msftncsi.com"))
+
+
+def is_linux_probe_host(host: str) -> bool:
+    return host in LINUX_PROBE_HOSTS
+
+
 # ========== Page Routes ==========
 
-@app.api_route("/", methods=["GET", "HEAD"], response_class=HTMLResponse)
+@app.api_route("/", methods=["GET", "HEAD", "POST"], response_class=HTMLResponse)
 async def index(request: Request, user: str = Depends(get_current_user)):
     """Landing page - shows dashboard for logged-in users, captive detection or welcome for others"""
     if user:
@@ -538,30 +603,30 @@ async def index(request: Request, user: str = Depends(get_current_user)):
     client_ip = get_real_client_ip(request)
     
     # Check if this is an OS captive portal probe requesting root '/'
-    if host_header in APPLE_PROBE_HOSTS:
+    if is_apple_probe_host(host_header):
         if is_ip_captive_authenticated(client_ip):
             return HTMLResponse(
                 content="<HTML><HEAD><TITLE>Success</TITLE></HEAD><BODY>Success</BODY></HTML>",
                 status_code=200
             )
-        return RedirectResponse(url="/welcome", status_code=302)
-    elif host_header in ANDROID_PROBE_HOSTS:
+        return RedirectResponse(url=get_captive_redirect_url(request), status_code=302)
+    elif is_android_probe_host(host_header):
         if is_ip_captive_authenticated(client_ip):
             return Response(status_code=204)
-        return RedirectResponse(url="/welcome", status_code=302)
-    elif host_header in WINDOWS_PROBE_HOSTS:
+        return RedirectResponse(url=get_captive_redirect_url(request), status_code=302)
+    elif is_windows_probe_host(host_header):
         if is_ip_captive_authenticated(client_ip):
             return PlainTextResponse("Microsoft Connect Test", status_code=200)
-        return RedirectResponse(url="/welcome", status_code=302)
-    elif host_header in LINUX_PROBE_HOSTS:
+        return RedirectResponse(url=get_captive_redirect_url(request), status_code=302)
+    elif is_linux_probe_host(host_header):
         if is_ip_captive_authenticated(client_ip):
             return PlainTextResponse("success\n", status_code=200)
-        return RedirectResponse(url="/welcome", status_code=302)
+        return RedirectResponse(url=get_captive_redirect_url(request), status_code=302)
     
     return await render_welcome_page(request)
 
 
-@app.api_route("/welcome", methods=["GET", "HEAD"], response_class=HTMLResponse)
+@app.api_route("/welcome", methods=["GET", "HEAD", "POST"], response_class=HTMLResponse)
 async def welcome_page(request: Request):
     """Explicit welcome and captive portal landing page"""
     return await render_welcome_page(request)
@@ -569,21 +634,21 @@ async def welcome_page(request: Request):
 
 # ========== Captive Portal Probe Routes ==========
 
-@app.api_route("/generate_204", methods=["GET", "HEAD"])
-@app.api_route("/gen_204", methods=["GET", "HEAD"])
-@app.api_route("/mobile/status.php", methods=["GET", "HEAD"])
+@app.api_route("/generate_204", methods=["GET", "HEAD", "POST"])
+@app.api_route("/gen_204", methods=["GET", "HEAD", "POST"])
+@app.api_route("/mobile/status.php", methods=["GET", "HEAD", "POST"])
 async def android_captive_probe(request: Request):
-    """Android / ChromeOS / Xiaomi / Huawei captive portal probe endpoint"""
+    """Android / ChromeOS / Xiaomi / Huawei / Vivo captive portal probe endpoint"""
     client_ip = get_real_client_ip(request)
     if is_ip_captive_authenticated(client_ip):
         return Response(status_code=204)
-    return RedirectResponse(url="/welcome", status_code=302)
+    return RedirectResponse(url=get_captive_redirect_url(request), status_code=302)
 
 
-@app.api_route("/hotspot-detect.html", methods=["GET", "HEAD"])
-@app.api_route("/library/test/success.html", methods=["GET", "HEAD"])
-@app.api_route("/success.html", methods=["GET", "HEAD"])
-@app.api_route("/captive.apple.com/hotspot-detect.html", methods=["GET", "HEAD"])
+@app.api_route("/hotspot-detect.html", methods=["GET", "HEAD", "POST"])
+@app.api_route("/library/test/success.html", methods=["GET", "HEAD", "POST"])
+@app.api_route("/success.html", methods=["GET", "HEAD", "POST"])
+@app.api_route("/captive.apple.com/hotspot-detect.html", methods=["GET", "HEAD", "POST"])
 async def apple_captive_probe(request: Request):
     """Apple iOS / macOS / iPadOS / watchOS Captive Network Assistant (CNA) probe endpoint"""
     client_ip = get_real_client_ip(request)
@@ -592,14 +657,14 @@ async def apple_captive_probe(request: Request):
             content="<HTML><HEAD><TITLE>Success</TITLE></HEAD><BODY>Success</BODY></HTML>",
             status_code=200
         )
-    return RedirectResponse(url="/welcome", status_code=302)
+    return RedirectResponse(url=get_captive_redirect_url(request), status_code=302)
 
 
-@app.api_route("/connecttest.txt", methods=["GET", "HEAD"])
-@app.api_route("/ncsi.txt", methods=["GET", "HEAD"])
-@app.api_route("/redirect", methods=["GET", "HEAD"])
-@app.api_route("/fwlink", methods=["GET", "HEAD"])
-@app.api_route("/fwlink/", methods=["GET", "HEAD"])
+@app.api_route("/connecttest.txt", methods=["GET", "HEAD", "POST"])
+@app.api_route("/ncsi.txt", methods=["GET", "HEAD", "POST"])
+@app.api_route("/redirect", methods=["GET", "HEAD", "POST"])
+@app.api_route("/fwlink", methods=["GET", "HEAD", "POST"])
+@app.api_route("/fwlink/", methods=["GET", "HEAD", "POST"])
 async def windows_captive_probe(request: Request):
     """Windows NCSI (Network Connectivity Status Indicator) probe endpoint"""
     client_ip = get_real_client_ip(request)
@@ -608,12 +673,12 @@ async def windows_captive_probe(request: Request):
         if "ncsi" in path:
             return PlainTextResponse("Microsoft NCSI", status_code=200)
         return PlainTextResponse("Microsoft Connect Test", status_code=200)
-    return RedirectResponse(url="/welcome", status_code=302)
+    return RedirectResponse(url=get_captive_redirect_url(request), status_code=302)
 
 
-@app.api_route("/success.txt", methods=["GET", "HEAD"])
-@app.api_route("/canonical.html", methods=["GET", "HEAD"])
-@app.api_route("/check_network_status.txt", methods=["GET", "HEAD"])
+@app.api_route("/success.txt", methods=["GET", "HEAD", "POST"])
+@app.api_route("/canonical.html", methods=["GET", "HEAD", "POST"])
+@app.api_route("/check_network_status.txt", methods=["GET", "HEAD", "POST"])
 async def linux_firefox_captive_probe(request: Request):
     """Linux NetworkManager and Firefox captive portal probe endpoint"""
     client_ip = get_real_client_ip(request)
@@ -622,7 +687,7 @@ async def linux_firefox_captive_probe(request: Request):
         if "check_network_status" in path:
             return PlainTextResponse("NetworkManager is online\n", status_code=200)
         return PlainTextResponse("success\n", status_code=200)
-    return RedirectResponse(url="/welcome", status_code=302)
+    return RedirectResponse(url=get_captive_redirect_url(request), status_code=302)
 
 
 # ========== Captive Portal API Routes ==========
@@ -650,6 +715,205 @@ async def api_captive_status(request: Request):
         "authenticated": authenticated,
         "ip": client_ip
     }
+
+
+# ========== OIDC / SSO Authentication Routes ==========
+
+def generate_pkce_pair():
+    """Generate PKCE code_verifier and code_challenge (RFC 7636, S256)"""
+    verifier_bytes = secrets.token_bytes(64)
+    code_verifier = base64.urlsafe_b64encode(verifier_bytes).decode('ascii').rstrip('=')
+    digest = hashlib.sha256(code_verifier.encode('ascii')).digest()
+    code_challenge = base64.urlsafe_b64encode(digest).decode('ascii').rstrip('=')
+    return code_verifier, code_challenge
+
+
+@app.get("/api/auth/sso/config")
+async def api_sso_config():
+    """Return SSO / OIDC availability and provider information"""
+    return {
+        "enabled": settings.is_oidc_active,
+        "provider_name": settings.oidc_provider_name or "SSO 单点登录"
+    }
+
+
+@app.get("/api/auth/sso/login")
+async def api_sso_login(request: Request):
+    """Initiate OIDC Authorization Code Flow with PKCE"""
+    if not settings.is_oidc_active:
+        return RedirectResponse(url="/login?error=sso_disabled", status_code=302)
+    
+    state = secrets.token_urlsafe(32)
+    code_verifier, code_challenge = generate_pkce_pair()
+    
+    request.session["oidc_state"] = state
+    request.session["oidc_code_verifier"] = code_verifier
+    
+    if settings.oidc_redirect_uri:
+        redirect_uri = settings.oidc_redirect_uri
+    else:
+        redirect_uri = str(request.url_for("api_sso_callback"))
+        if request.headers.get("X-Forwarded-Proto") == "https":
+            redirect_uri = redirect_uri.replace("http://", "https://", 1)
+    
+    issuer = settings.oidc_issuer_url.rstrip("/")
+    auth_endpoint = f"{issuer}/oauth2/auth"
+    
+    params = {
+        "client_id": settings.oidc_client_id,
+        "response_type": "code",
+        "redirect_uri": redirect_uri,
+        "scope": settings.oidc_scopes,
+        "state": state,
+        "code_challenge": code_challenge,
+        "code_challenge_method": "S256"
+    }
+    
+    target_url = f"{auth_endpoint}?{urlencode(params)}"
+    return RedirectResponse(url=target_url, status_code=302)
+
+
+@app.get("/api/auth/sso/callback")
+async def api_sso_callback(
+    request: Request,
+    code: str = None,
+    state: str = None,
+    error: str = None,
+    error_description: str = None
+):
+    """Handle OIDC Callback, exchange code for tokens, and provision/authenticate user"""
+    if error:
+        err_msg = error_description or error
+        print(f"[OIDC ERROR] Provider returned error: {err_msg}")
+        return RedirectResponse(url=f"/login?error={err_msg}", status_code=302)
+    
+    expected_state = request.session.get("oidc_state")
+    code_verifier = request.session.get("oidc_code_verifier")
+    
+    if not state or not expected_state or state != expected_state:
+        print("[OIDC ERROR] Invalid state parameter (CSRF detected or session expired)")
+        return RedirectResponse(url="/login?error=invalid_state", status_code=302)
+    
+    if not code:
+        return RedirectResponse(url="/login?error=missing_code", status_code=302)
+    
+    if settings.oidc_redirect_uri:
+        redirect_uri = settings.oidc_redirect_uri
+    else:
+        redirect_uri = str(request.url_for("api_sso_callback"))
+        if request.headers.get("X-Forwarded-Proto") == "https":
+            redirect_uri = redirect_uri.replace("http://", "https://", 1)
+    
+    issuer = settings.oidc_issuer_url.rstrip("/")
+    token_endpoint = f"{issuer}/oauth2/token"
+    
+    token_data = {
+        "grant_type": "authorization_code",
+        "code": code,
+        "redirect_uri": redirect_uri,
+        "client_id": settings.oidc_client_id,
+        "client_secret": settings.oidc_client_secret,
+        "code_verifier": code_verifier
+    }
+    
+    try:
+        async with httpx.AsyncClient(timeout=10.0, verify=False) as client:
+            token_resp = await client.post(token_endpoint, data=token_data)
+            if token_resp.status_code != 200:
+                print(f"[OIDC ERROR] Token endpoint returned {token_resp.status_code}: {token_resp.text}")
+                return RedirectResponse(url="/login?error=token_exchange_failed", status_code=302)
+            
+            token_json = token_resp.json()
+            id_token = token_json.get("id_token")
+            access_token = token_json.get("access_token")
+            
+            claims = {}
+            if id_token and jwt is not None:
+                try:
+                    claims = jwt.get_unverified_claims(id_token)
+                except Exception as e:
+                    print(f"[OIDC WARNING] Failed to decode unverified claims: {e}")
+            
+            if not claims and access_token:
+                userinfo_endpoint = f"{issuer}/oauth2/userinfo"
+                userinfo_resp = await client.get(
+                    userinfo_endpoint,
+                    headers={"Authorization": f"Bearer {access_token}"}
+                )
+                if userinfo_resp.status_code == 200:
+                    claims = userinfo_resp.json()
+            
+            sub = str(claims.get("sub", ""))
+            username = claims.get("preferred_username") or claims.get("username") or claims.get("name") or sub
+            display_name = claims.get("name") or claims.get("nickname") or username
+            email = claims.get("email")
+            
+            if not sub and not username:
+                print("[OIDC ERROR] Could not extract user identity from claims")
+                return RedirectResponse(url="/login?error=invalid_user_claims", status_code=302)
+            
+            async with AsyncSessionLocal() as db:
+                system_user = None
+                if sub:
+                    result = await db.execute(select(SystemUser).where(SystemUser.oidc_sub == sub))
+                    system_user = result.scalar_one_or_none()
+                
+                if not system_user and username:
+                    result = await db.execute(select(SystemUser).where(SystemUser.username == username))
+                    system_user = result.scalar_one_or_none()
+                    if system_user:
+                        system_user.oidc_sub = sub
+                        system_user.auth_provider = "oidc"
+                        if email and not system_user.email:
+                            system_user.email = email
+                        await db.commit()
+                
+                if not system_user:
+                    if settings.oidc_auto_create_user:
+                        system_user = SystemUser(
+                            username=username,
+                            password_hash="OIDC_MANAGED",
+                            display_name=display_name,
+                            email=email,
+                            is_admin=True,
+                            is_active=True,
+                            auth_provider="oidc",
+                            oidc_sub=sub,
+                            created_by="OIDC SSO",
+                            description="Automatically created via OIDC SSO"
+                        )
+                        db.add(system_user)
+                        await db.commit()
+                        await db.refresh(system_user)
+                        print(f"[OIDC] Auto-provisioned user '{username}' (sub: {sub})")
+                    else:
+                        print(f"[OIDC] User '{username}' does not exist locally and auto-provisioning is disabled")
+                        return RedirectResponse(url="/login?error=user_not_authorized", status_code=302)
+                
+                system_user.last_login_at = datetime.now(timezone(timedelta(hours=8)))
+                await db.commit()
+                authenticated_username = system_user.username
+            
+            jwt_token = create_access_token({"sub": authenticated_username})
+            request.session["user"] = authenticated_username
+            
+            response = RedirectResponse(url="/", status_code=302)
+            response.set_cookie(
+                key="access_token",
+                value=f"Bearer {jwt_token}",
+                httponly=True,
+                max_age=3600 * 24 * 7 if settings.debug else 3600 * 24,
+                samesite="lax"
+            )
+            print(f"[OIDC SUCCESS] User '{authenticated_username}' logged in successfully via SSO")
+            return response
+            
+    except Exception as e:
+        print(f"[OIDC ERROR] Exception during SSO callback: {e}")
+        import traceback
+        traceback.print_exc()
+        return RedirectResponse(url="/login?error=sso_failed", status_code=302)
+
 
 
 @app.get("/login", response_class=HTMLResponse)

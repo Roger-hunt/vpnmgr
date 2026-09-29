@@ -29,6 +29,10 @@ class SystemUser(Base):
     vpn_username = Column(String(100), unique=True, nullable=True, index=True)
     vpn_password = Column(String(255), nullable=True)  # Encrypted
     
+    # Auth provider & OIDC binding
+    auth_provider = Column(String(50), default="local")  # 'local', 'oidc', etc.
+    oidc_sub = Column(String(255), unique=True, nullable=True, index=True)
+    
     # User info
     display_name = Column(String(100))
     email = Column(String(100))
@@ -57,6 +61,8 @@ class SystemUser(Base):
             "email": self.email,
             "is_admin": self.is_admin,
             "is_active": self.is_active,
+            "auth_provider": self.auth_provider or "local",
+            "oidc_sub": self.oidc_sub,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "last_login_at": self.last_login_at.isoformat() if self.last_login_at else None,
             "created_by": self.created_by,
