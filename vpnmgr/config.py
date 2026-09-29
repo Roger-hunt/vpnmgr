@@ -17,6 +17,9 @@ class Settings(BaseSettings):
     
     # Docker
     vpn_container_name: str = "ipsec-vpn-server"
+
+    # VPN client network (IKEv2 assigned subnet)
+    vpn_subnet: str = "192.168.43.0/24"
     
     # Database
     database_url: str = "sqlite+aiosqlite:///./data/vpnmgr.db"

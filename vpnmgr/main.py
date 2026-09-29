@@ -18,7 +18,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone, timedelta
 
 from fastapi import FastAPI, Request, Depends, HTTPException, status, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response, PlainTextResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
@@ -196,18 +196,6 @@ async def sync_connection_history():
                             await db.commit()
                             _active_sessions[session_id] = conn
                             print(f"[SYNC] Saved connection: {session_id} with IP {assigned_ip}")
-                            
-                            # Auto-authorize VPN clients with bound system accounts
-                            # (Android VPN connections don't trigger captive portal popups,
-                            #  so we auto-whitelist trusted certificates)
-                            if system_user and assigned_ip and assigned_ip != '-':
-                                try:
-                                    set_ip_captive_authenticated(assigned_ip)
-                                    from .utils.captive_firewall import authorize_ip
-                                    authorize_ip(assigned_ip)
-                                    print(f"[AUTO-AUTH] Auto-authorized {assigned_ip} for bound user '{bound_username}' (cert: {cert_name})")
-                                except Exception as fw_err:
-                                    print(f"[AUTO-AUTH ERROR] Failed to auto-authorize {assigned_ip}: {fw_err}")
                         except Exception as e:
                             print(f"[SYNC ERROR] Failed to save connection: {e}")
                             import traceback
@@ -269,15 +257,6 @@ async def sync_connection_history():
                 
                 # Remove disconnected sessions from tracking
                 for session_id in disconnected_sessions:
-                    sconn = _active_sessions.get(session_id, {})
-                    assigned_ip = sconn.get('assigned_ip')
-                    if assigned_ip and assigned_ip != '-':
-                        _captive_authenticated_ips.pop(assigned_ip, None)
-                        try:
-                            from .utils.captive_firewall import deauthorize_ip
-                            deauthorize_ip(assigned_ip)
-                        except Exception as e:
-                            print(f"[FIREWALL ERROR] Could not deauthorize {assigned_ip}: {e}")
                     del _active_sessions[session_id]
                 
         except Exception as e:
@@ -295,13 +274,12 @@ async def lifespan(app: FastAPI):
     print(f"🚀 VPN Manager starting...")
     print(f"   Container: {settings.vpn_container_name}")
     
-    # Initialize Captive Firewall Enforcement
+    # Ensure VPN clients can reach the internet, and purge legacy captive rules
     try:
-        from .utils.captive_firewall import init_captive_firewall
-        init_captive_firewall()
-        print("🛡️ Captive portal firewall enforcement initialized")
+        from .utils.vpn_forwarding import ensure_open_forwarding
+        ensure_open_forwarding()
     except Exception as e:
-        print(f"[FIREWALL WARNING] Could not initialize firewall: {e}")
+        print(f"[FORWARD WARNING] Could not set up VPN forwarding: {e}")
     
     # Clean up stale connections from previous runs
     await cleanup_stale_connections()
@@ -419,11 +397,6 @@ def check_admin_auth(username: str, password: str) -> bool:
     return username == settings.admin_username and password == settings.admin_password
 
 
-# Captive Portal Session Storage (Client IP -> Expire Timestamp)
-_captive_authenticated_ips: dict = {}
-CAPTIVE_SESSION_TTL = 86400  # 24 hours
-
-
 def get_real_client_ip(request: Request) -> str:
     """Extract real client IP from headers (behind reverse proxy) or connection."""
     forwarded_for = request.headers.get("X-Forwarded-For")
@@ -435,25 +408,6 @@ def get_real_client_ip(request: Request) -> str:
     if request.client and request.client.host:
         return request.client.host
     return "unknown"
-
-
-def is_ip_captive_authenticated(ip: str) -> bool:
-    """Check if the client IP has completed captive portal authentication."""
-    if not ip or ip == "unknown":
-        return False
-    exp = _captive_authenticated_ips.get(ip)
-    if exp is not None:
-        if exp > time.time():
-            return True
-        else:
-            del _captive_authenticated_ips[ip]
-    return False
-
-
-def set_ip_captive_authenticated(ip: str, duration: int = CAPTIVE_SESSION_TTL) -> None:
-    """Mark a client IP as authenticated for captive portal access."""
-    if ip and ip != "unknown":
-        _captive_authenticated_ips[ip] = time.time() + duration
 
 
 def is_valid_vpn_ip(ip: str) -> bool:
@@ -469,9 +423,8 @@ def is_valid_vpn_ip(ip: str) -> bool:
 
 
 async def render_welcome_page(request: Request) -> HTMLResponse:
-    """Render welcome landing page with captive portal status and connection details."""
+    """Render the informational welcome landing page with connection details."""
     real_ip = get_real_client_ip(request)
-    is_captive_auth = is_ip_captive_authenticated(real_ip)
     
     try:
         vpn_status = vpn_manager.get_status()
@@ -523,8 +476,7 @@ async def render_welcome_page(request: Request) -> HTMLResponse:
             "bound_username": bound_username,
             "assigned_ip": assigned_ip,
             "client_ip": client_ip,
-            "real_ip": real_ip,
-            "is_captive_auth": is_captive_auth
+            "real_ip": real_ip
         })
     except Exception as e:
         print(f"[WELCOME ERROR] {e}")
@@ -541,284 +493,24 @@ async def render_welcome_page(request: Request) -> HTMLResponse:
             "bound_username": None,
             "assigned_ip": None,
             "client_ip": None,
-            "real_ip": real_ip,
-            "is_captive_auth": is_captive_auth
+            "real_ip": real_ip
         })
-
-
-def get_captive_redirect_url(request: Request) -> str:
-    """Build redirect URL for captive portal, preserving host header if present."""
-    host = request.headers.get("Host", "").strip()
-    if host:
-        return f"http://{host}/welcome"
-    return "/welcome"
-
-
-# Known OS captive probe domains (matching probe requests hitting root '/')
-APPLE_PROBE_HOSTS = {
-    "captive.apple.com", "www.apple.com", "appleiphonecell.com",
-    "ibook.info", "itools.info", "airport.us", "thinkdifferent.us"
-}
-
-# Android & domestic Chinese vendor probe hosts (Vivo, Xiaomi, Huawei, Oppo, etc.)
-ANDROID_PROBE_HOSTS = {
-    # AOSP / Google
-    "connectivitycheck.gstatic.com", "www.google.com", "play.googleapis.com",
-    "connectivitycheck.android.com", "clients3.google.com", "google.cn", "g.cn",
-    # Vivo
-    "wifi.vivo.com.cn", "devel.vivo.com.cn",
-    # Xiaomi / Redmi
-    "connect.rom.miui.com",
-    # Huawei / Honor
-    "connectivitycheck.platform.hicloud.com", "connectivity.hihonor.com",
-    # Oppo / Realme / OnePlus
-    "captive.oppomobile.com", "connectivity.coloros.com",
-    # Meizu / Others
-    "connectivitycheck.flyme.cn", "captiveportal.baidu.com", "wifi.qq.com"
-}
-
-WINDOWS_PROBE_HOSTS = {
-    "www.msftconnecttest.com", "msftconnecttest.com", "www.msftncsi.com", "msftncsi.com",
-    "ipv6.msftconnecttest.com"
-}
-
-LINUX_PROBE_HOSTS = {
-    "detectportal.firefox.com", "nmcheck.gnome.org"
-}
-
-
-def is_android_probe_host(host: str) -> bool:
-    if not host:
-        return False
-    if host in ANDROID_PROBE_HOSTS:
-        return True
-    return any(host.endswith(suffix) for suffix in (
-        ".vivo.com.cn", ".miui.com", ".hicloud.com", ".hihonor.com",
-        ".oppomobile.com", ".coloros.com", ".flyme.cn", ".gstatic.com", ".android.com"
-    ))
-
-
-def is_apple_probe_host(host: str) -> bool:
-    if not host:
-        return False
-    if host in APPLE_PROBE_HOSTS:
-        return True
-    return any(host.endswith(suffix) for suffix in (
-        ".apple.com", "airport.us", "thinkdifferent.us", "ibook.info", "itools.info"
-    ))
-
-
-def is_windows_probe_host(host: str) -> bool:
-    if not host:
-        return False
-    if host in WINDOWS_PROBE_HOSTS:
-        return True
-    return any(host.endswith(suffix) for suffix in (".msftconnecttest.com", ".msftncsi.com"))
-
-
-def is_linux_probe_host(host: str) -> bool:
-    return host in LINUX_PROBE_HOSTS
 
 
 # ========== Page Routes ==========
 
 @app.api_route("/", methods=["GET", "HEAD", "POST"], response_class=HTMLResponse)
 async def index(request: Request, user: str = Depends(get_current_user)):
-    """Landing page - shows dashboard for logged-in users, captive detection or welcome for others"""
+    """Landing page - dashboard for logged-in users, informational welcome for others"""
     if user:
         return templates.TemplateResponse("index.html", {"request": request, "user": user})
-    
-    host_header = request.headers.get("Host", "").lower().split(":")[0]
-    client_ip = get_real_client_ip(request)
-    
-    # Check if this is an OS captive portal probe requesting root '/'
-    if is_apple_probe_host(host_header):
-        if is_ip_captive_authenticated(client_ip):
-            return HTMLResponse(
-                content="<HTML><HEAD><TITLE>Success</TITLE></HEAD><BODY>Success</BODY></HTML>",
-                status_code=200
-            )
-        return RedirectResponse(url=get_captive_redirect_url(request), status_code=302)
-    elif is_android_probe_host(host_header):
-        if is_ip_captive_authenticated(client_ip):
-            return Response(status_code=204)
-        return RedirectResponse(url=get_captive_redirect_url(request), status_code=302)
-    elif is_windows_probe_host(host_header):
-        if is_ip_captive_authenticated(client_ip):
-            return PlainTextResponse("Microsoft Connect Test", status_code=200)
-        return RedirectResponse(url=get_captive_redirect_url(request), status_code=302)
-    elif is_linux_probe_host(host_header):
-        if is_ip_captive_authenticated(client_ip):
-            return PlainTextResponse("success\n", status_code=200)
-        return RedirectResponse(url=get_captive_redirect_url(request), status_code=302)
-    
     return await render_welcome_page(request)
 
 
 @app.api_route("/welcome", methods=["GET", "HEAD", "POST"], response_class=HTMLResponse)
 async def welcome_page(request: Request):
-    """Explicit welcome and captive portal landing page"""
+    """Informational welcome landing page"""
     return await render_welcome_page(request)
-
-
-# ========== Captive Portal Probe Routes ==========
-
-@app.api_route("/generate_204", methods=["GET", "HEAD", "POST"])
-@app.api_route("/gen_204", methods=["GET", "HEAD", "POST"])
-@app.api_route("/mobile/status.php", methods=["GET", "HEAD", "POST"])
-async def android_captive_probe(request: Request):
-    """Android / ChromeOS / Xiaomi / Huawei / Vivo captive portal probe endpoint"""
-    client_ip = get_real_client_ip(request)
-    if is_ip_captive_authenticated(client_ip):
-        return Response(status_code=204)
-    return RedirectResponse(url=get_captive_redirect_url(request), status_code=302)
-
-
-@app.api_route("/hotspot-detect.html", methods=["GET", "HEAD", "POST"])
-@app.api_route("/library/test/success.html", methods=["GET", "HEAD", "POST"])
-@app.api_route("/success.html", methods=["GET", "HEAD", "POST"])
-@app.api_route("/captive.apple.com/hotspot-detect.html", methods=["GET", "HEAD", "POST"])
-async def apple_captive_probe(request: Request):
-    """Apple iOS / macOS / iPadOS / watchOS Captive Network Assistant (CNA) probe endpoint"""
-    client_ip = get_real_client_ip(request)
-    if is_ip_captive_authenticated(client_ip):
-        return HTMLResponse(
-            content="<HTML><HEAD><TITLE>Success</TITLE></HEAD><BODY>Success</BODY></HTML>",
-            status_code=200
-        )
-    return RedirectResponse(url=get_captive_redirect_url(request), status_code=302)
-
-
-@app.api_route("/connecttest.txt", methods=["GET", "HEAD", "POST"])
-@app.api_route("/ncsi.txt", methods=["GET", "HEAD", "POST"])
-@app.api_route("/redirect", methods=["GET", "HEAD", "POST"])
-@app.api_route("/fwlink", methods=["GET", "HEAD", "POST"])
-@app.api_route("/fwlink/", methods=["GET", "HEAD", "POST"])
-async def windows_captive_probe(request: Request):
-    """Windows NCSI (Network Connectivity Status Indicator) probe endpoint"""
-    client_ip = get_real_client_ip(request)
-    if is_ip_captive_authenticated(client_ip):
-        path = request.url.path
-        if "ncsi" in path:
-            return PlainTextResponse("Microsoft NCSI", status_code=200)
-        return PlainTextResponse("Microsoft Connect Test", status_code=200)
-    return RedirectResponse(url=get_captive_redirect_url(request), status_code=302)
-
-
-@app.api_route("/success.txt", methods=["GET", "HEAD", "POST"])
-@app.api_route("/canonical.html", methods=["GET", "HEAD", "POST"])
-@app.api_route("/check_network_status.txt", methods=["GET", "HEAD", "POST"])
-async def linux_firefox_captive_probe(request: Request):
-    """Linux NetworkManager and Firefox captive portal probe endpoint"""
-    client_ip = get_real_client_ip(request)
-    if is_ip_captive_authenticated(client_ip):
-        path = request.url.path
-        if "check_network_status" in path:
-            return PlainTextResponse("NetworkManager is online\n", status_code=200)
-        return PlainTextResponse("success\n", status_code=200)
-    return RedirectResponse(url=get_captive_redirect_url(request), status_code=302)
-
-
-# ========== Captive Portal API Routes ==========
-
-@app.post("/api/captive/complete")
-async def api_captive_complete(request: Request):
-    """Authorize the client IP to access the Internet via captive portal"""
-    candidate_ips = set()
-    req_ip = get_real_client_ip(request)
-    if req_ip and req_ip != "unknown":
-        candidate_ips.add(req_ip)
-        
-    try:
-        body = await request.json()
-        if isinstance(body, dict):
-            for k in ("client_ip", "assigned_ip", "ip"):
-                val = body.get(k)
-                if val and isinstance(val, str) and val != "unknown":
-                    candidate_ips.add(val.strip())
-    except Exception:
-        pass
-
-    vpn_status = vpn_manager.get_status()
-    active_conns = vpn_status.get("active_connections", [])
-    
-    authorized_vpn_ips = []
-    from .utils.captive_firewall import authorize_ip
-
-    for ip in list(candidate_ips):
-        set_ip_captive_authenticated(ip)
-        if is_valid_vpn_ip(ip):
-            try:
-                authorize_ip(ip)
-                authorized_vpn_ips.append(ip)
-                print(f"[FIREWALL] Unblocked internet traffic for VPN client: {ip}")
-            except Exception as e:
-                print(f"[FIREWALL ERROR] Failed to authorize IP {ip}: {e}")
-        else:
-            # Check if this IP matches an active connection's public client_ip
-            for conn in active_conns:
-                if conn.get("client_ip") == ip:
-                    assigned = conn.get("assigned_ip")
-                    if assigned and is_valid_vpn_ip(assigned):
-                        try:
-                            authorize_ip(assigned)
-                            set_ip_captive_authenticated(assigned)
-                            authorized_vpn_ips.append(assigned)
-                            print(f"[FIREWALL] Matched and unblocked VPN client: {assigned} (client: {ip})")
-                        except Exception as e:
-                            print(f"[FIREWALL ERROR] Failed to authorize assigned IP {assigned}: {e}")
-
-    # Fallback: if no VPN IP was authorized yet, but there is exactly 1 active VPN connection, authorize it
-    if not authorized_vpn_ips and len(active_conns) == 1:
-        single_assigned = active_conns[0].get("assigned_ip")
-        if single_assigned and is_valid_vpn_ip(single_assigned):
-            try:
-                authorize_ip(single_assigned)
-                set_ip_captive_authenticated(single_assigned)
-                authorized_vpn_ips.append(single_assigned)
-                print(f"[FIREWALL] Single connection fallback unblocked: {single_assigned}")
-            except Exception as e:
-                print(f"[FIREWALL ERROR] Single connection fallback failed: {e}")
-
-    print(f"[CAPTIVE] Client authorized. Request IP: {req_ip}, VPN IPs unblocked: {authorized_vpn_ips}")
-    return {
-        "success": True,
-        "authenticated": True,
-        "ip": req_ip,
-        "authorized_vpn_ips": authorized_vpn_ips,
-        "message": "Captive authentication successful"
-    }
-
-
-@app.get("/api/captive/status")
-async def api_captive_status(request: Request):
-    """Check captive portal authorization status for the requesting client IP"""
-    client_ip = get_real_client_ip(request)
-    authenticated = is_ip_captive_authenticated(client_ip)
-    return {
-        "authenticated": authenticated,
-        "ip": client_ip
-    }
-
-
-@app.post("/api/captive/reset")
-async def api_captive_reset():
-    """Clear all captive portal authorizations (useful for testing)"""
-    count = len(_captive_authenticated_ips)
-    _captive_authenticated_ips.clear()
-    
-    try:
-        from .utils.captive_firewall import reset_firewall
-        reset_firewall()
-    except Exception as e:
-        print(f"[FIREWALL ERROR] Reset firewall failed: {e}")
-        
-    print(f"[CAPTIVE] Cleared {count} authorized IPs from memory and firewall")
-    return {
-        "success": True,
-        "cleared_count": count,
-        "message": f"Cleared {count} captive authorizations"
-    }
 
 
 # ========== OIDC / SSO Authentication Routes ==========
