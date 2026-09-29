@@ -528,7 +528,7 @@ LINUX_PROBE_HOSTS = {
 
 # ========== Page Routes ==========
 
-@app.get("/", response_class=HTMLResponse)
+@app.api_route("/", methods=["GET", "HEAD"], response_class=HTMLResponse)
 async def index(request: Request, user: str = Depends(get_current_user)):
     """Landing page - shows dashboard for logged-in users, captive detection or welcome for others"""
     if user:
@@ -561,7 +561,7 @@ async def index(request: Request, user: str = Depends(get_current_user)):
     return await render_welcome_page(request)
 
 
-@app.get("/welcome", response_class=HTMLResponse)
+@app.api_route("/welcome", methods=["GET", "HEAD"], response_class=HTMLResponse)
 async def welcome_page(request: Request):
     """Explicit welcome and captive portal landing page"""
     return await render_welcome_page(request)
