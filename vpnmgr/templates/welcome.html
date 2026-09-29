@@ -249,6 +249,53 @@
             background: var(--gray-200);
         }
 
+        .btn-connect {
+            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+            color: white;
+            border: none;
+            box-shadow: 0 4px 14px rgba(16, 185, 129, 0.35);
+            cursor: pointer;
+            width: 100%;
+            font-size: 1rem;
+            transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .btn-connect:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 20px rgba(16, 185, 129, 0.45);
+            background: linear-gradient(135deg, #059669 0%, #047857 100%);
+        }
+
+        .btn-connect:active {
+            transform: translateY(0);
+        }
+
+        .btn-connect.btn-connect-success {
+            background: linear-gradient(135deg, #059669 0%, #047857 100%);
+            box-shadow: 0 2px 8px rgba(16, 185, 129, 0.25);
+            cursor: default;
+            transform: none !important;
+        }
+
+        .btn-connect:disabled {
+            opacity: 0.85;
+            cursor: not-allowed;
+            transform: none !important;
+        }
+
+        .captive-toast {
+            margin-top: 4px;
+            padding: 12px 16px;
+            border-radius: var(--radius);
+            background: #ecfdf5;
+            border: 1px solid #a7f3d0;
+            color: #065f46;
+            font-size: 0.875rem;
+            line-height: 1.4;
+            animation: fadeIn 0.3s ease;
+            text-align: center;
+        }
+
         .welcome-footer {
             margin-top: 24px;
             padding-top: 24px;
@@ -354,6 +401,22 @@
             {% endif %}
             
             <div class="action-buttons">
+                <button id="btn-captive-connect" type="button" class="btn btn-connect {% if is_captive_auth %}btn-connect-success{% endif %}" onclick="completeCaptiveAuth()">
+                    <svg id="captive-btn-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        {% if is_captive_auth %}
+                        <polyline points="20 6 9 17 4 12"/>
+                        {% else %}
+                        <circle cx="12" cy="12" r="10"/>
+                        <line x1="2" y1="12" x2="22" y2="12"/>
+                        <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
+                        {% endif %}
+                    </svg>
+                    <span id="captive-btn-text" data-i18n="{% if is_captive_auth %}welcome.authenticated{% else %}welcome.continueInternet{% endif %}">
+                        {% if is_captive_auth %}已成功接入互联网{% else %}继续上网 / 接入互联网{% endif %}
+                    </span>
+                </button>
+                <div id="captive-status-toast" class="captive-toast" style="display: none;"></div>
+
                 <a href="/public-debug" class="btn btn-primary">
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <rect x="2" y="2" width="20" height="8" rx="2" ry="2"/>
@@ -377,5 +440,54 @@
             </div>
         </div>
     </div>
+    <script>
+        async function completeCaptiveAuth() {
+            const btn = document.getElementById('btn-captive-connect');
+            const btnText = document.getElementById('captive-btn-text');
+            const btnIcon = document.getElementById('captive-btn-icon');
+            const toast = document.getElementById('captive-status-toast');
+            
+            if (!btn || btn.classList.contains('btn-connect-success')) return;
+
+            btn.disabled = true;
+            const currentLang = localStorage.getItem('vpnmgr_lang') || 'zh';
+            btnText.textContent = (currentLang === 'en') ? 'Connecting...' : '正在接入互联网...';
+            
+            try {
+                const res = await fetch('/api/captive/complete', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+                const data = await res.json();
+                if (data.success) {
+                    btn.classList.add('btn-connect-success');
+                    btnText.textContent = (currentLang === 'en') ? 'Connected to Internet' : '已成功接入互联网';
+                    btnText.setAttribute('data-i18n', 'welcome.authenticated');
+                    btnIcon.innerHTML = '<polyline points="20 6 9 17 4 12"/>';
+                    
+                    if (toast) {
+                        toast.textContent = (currentLang === 'en') 
+                            ? 'Authentication successful! You can now access the Internet or close this window.' 
+                            : '认证成功！您现已正常接入互联网，此窗口可直接关闭。';
+                        toast.style.display = 'block';
+                    }
+                    
+                    // Touch OS probe endpoints in background to trigger dismissal of CNA
+                    try {
+                        fetch('/generate_204', { mode: 'no-cors' }).catch(() => {});
+                        fetch('/hotspot-detect.html', { mode: 'no-cors' }).catch(() => {});
+                    } catch (e) {}
+                } else {
+                    btn.disabled = false;
+                    btnText.textContent = (currentLang === 'en') ? 'Try Again' : '重试';
+                    alert(data.message || 'Authentication failed');
+                }
+            } catch (e) {
+                console.error('Captive auth error:', e);
+                btn.disabled = false;
+                btnText.textContent = (currentLang === 'en') ? 'Try Again' : '重试';
+            }
+        }
+    </script>
 </body>
 </html>

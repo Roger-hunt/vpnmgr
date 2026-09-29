@@ -2,6 +2,8 @@
 VPN Manager - FastAPI Application
 """
 import os
+import time
+import ipaddress
 import asyncio
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone, timedelta
@@ -379,84 +381,98 @@ def check_admin_auth(username: str, password: str) -> bool:
     return username == settings.admin_username and password == settings.admin_password
 
 
-# ========== Page Routes ==========
+# Captive Portal Session Storage (Client IP -> Expire Timestamp)
+_captive_authenticated_ips: dict = {}
+CAPTIVE_SESSION_TTL = 86400  # 24 hours
 
-@app.get("/", response_class=HTMLResponse)
-async def index(request: Request, user: str = Depends(get_current_user)):
-    """Landing page - shows welcome page for anonymous users, dashboard for logged-in users"""
-    if user:
-        # Logged-in users see the dashboard
-        return templates.TemplateResponse("index.html", {"request": request, "user": user})
-    
-    # Anonymous users see the welcome landing page
-    # Get public stats for display
+
+def get_real_client_ip(request: Request) -> str:
+    """Extract real client IP from headers (behind reverse proxy) or connection."""
+    forwarded_for = request.headers.get("X-Forwarded-For")
+    if forwarded_for:
+        return forwarded_for.split(",")[0].strip()
+    real_ip = request.headers.get("X-Real-IP")
+    if real_ip:
+        return real_ip.strip()
+    if request.client and request.client.host:
+        return request.client.host
+    return "unknown"
+
+
+def is_ip_captive_authenticated(ip: str) -> bool:
+    """Check if the client IP has completed captive portal authentication."""
+    if not ip or ip == "unknown":
+        return False
+    exp = _captive_authenticated_ips.get(ip)
+    if exp is not None:
+        if exp > time.time():
+            return True
+        else:
+            del _captive_authenticated_ips[ip]
+    return False
+
+
+def set_ip_captive_authenticated(ip: str, duration: int = CAPTIVE_SESSION_TTL) -> None:
+    """Mark a client IP as authenticated for captive portal access."""
+    if ip and ip != "unknown":
+        _captive_authenticated_ips[ip] = time.time() + duration
+
+
+def is_valid_vpn_ip(ip: str) -> bool:
+    """Check if IP is a valid VPN client IP (192.168.43.0/24)"""
+    if not ip or ip == 'unknown':
+        return False
     try:
-        # Get VPN status (public info only)
+        addr = ipaddress.ip_address(ip)
+        vpn_network = ipaddress.ip_network('192.168.43.0/24')
+        return addr in vpn_network and ip not in ('192.168.43.0', '192.168.43.255')
+    except ValueError:
+        return False
+
+
+async def render_welcome_page(request: Request) -> HTMLResponse:
+    """Render welcome landing page with captive portal status and connection details."""
+    real_ip = get_real_client_ip(request)
+    is_captive_auth = is_ip_captive_authenticated(real_ip)
+    
+    try:
         vpn_status = vpn_manager.get_status()
         vpn_running = vpn_status.get("container_running", False)
         active_conns = vpn_status.get("active_connections", [])
         active_conns_count = len(active_conns)
         
-        # Get client real IP
-        direct_ip = request.client.host if request.client else 'unknown'
-        forwarded_for = request.headers.get('X-Forwarded-For')
-        if forwarded_for:
-            real_ip = forwarded_for.split(',')[0].strip()
-        else:
-            real_ip = request.headers.get('X-Real-IP') or direct_ip
-        
-        print(f"[WELCOME] IP detection: direct_ip={direct_ip}, X-Forwarded-For={request.headers.get('X-Forwarded-For')}, X-Real-IP={request.headers.get('X-Real-IP')}, real_ip={real_ip}")
-        print(f"[WELCOME] active_conns count={len(active_conns)}, conns={active_conns}")
-        
-        # Check if user is connected via VPN
         is_connected = False
         cert_name = None
         assigned_ip = None
         client_ip = None
         bound_username = None
         
-        # Get total users count and lookup binding in same session
         async with AsyncSessionLocal() as db:
-            from sqlalchemy import func
             result = await db.execute(select(func.count(SystemUser.id)))
             total_users = result.scalar() or 0
             
-            # If connected via VPN, look up bound username
             if is_valid_vpn_ip(real_ip):
-                print(f"[WELCOME] real_ip {real_ip} is a VPN IP, searching active connections...")
                 for conn in active_conns:
                     conn_assigned = conn.get('assigned_ip', '-')
                     conn_client = conn.get('client_ip', '-')
-                    print(f"[WELCOME]   Checking conn: assigned_ip={conn_assigned}, client_ip={conn_client}")
-                    # Primary match: by assigned_ip (VPN internal IP)
-                    # Fallback match: real_ip matches client_ip (rare but possible in direct setups)
                     if conn_assigned == real_ip or conn_client == real_ip:
                         is_connected = True
                         cert_name = conn.get('username', 'Unknown')
                         assigned_ip = conn_assigned
                         client_ip = conn_client
-                        print(f"[WELCOME] Matched connection: cert={cert_name}, assigned_ip={assigned_ip}, client_ip={client_ip}")
                         
-                        # Look up bound username for this certificate from SystemUser
                         try:
-                            result = await db.execute(
+                            user_res = await db.execute(
                                 select(SystemUser)
                                 .where(SystemUser.vpn_cert_name == cert_name)
                                 .where(SystemUser.is_active == True)
                             )
-                            system_user = result.scalar_one_or_none()
+                            system_user = user_res.scalar_one_or_none()
                             if system_user:
                                 bound_username = system_user.username
-                                print(f"[WELCOME] Found binding: {cert_name} -> {bound_username}")
-                            else:
-                                print(f"[WELCOME] No binding found for cert: {cert_name}")
                         except Exception as e:
                             print(f"[WELCOME ERROR] Failed to lookup binding: {e}")
                         break
-                if not is_connected:
-                    print(f"[WELCOME] VPN IP {real_ip} not matched in any active connection (assigned_ip list: {[c.get('assigned_ip') for c in active_conns]})")
-            else:
-                print(f"[WELCOME] real_ip={real_ip} is NOT a VPN IP")
         
         return templates.TemplateResponse("welcome.html", {
             "request": request,
@@ -469,14 +485,13 @@ async def index(request: Request, user: str = Depends(get_current_user)):
             "bound_username": bound_username,
             "assigned_ip": assigned_ip,
             "client_ip": client_ip,
-            "real_ip": real_ip
+            "real_ip": real_ip,
+            "is_captive_auth": is_captive_auth
         })
     except Exception as e:
         print(f"[WELCOME ERROR] {e}")
         import traceback
         traceback.print_exc()
-        # Fallback if stats fail to load
-        real_ip = request.client.host if request.client else 'unknown'
         return templates.TemplateResponse("welcome.html", {
             "request": request,
             "user": None,
@@ -488,8 +503,153 @@ async def index(request: Request, user: str = Depends(get_current_user)):
             "bound_username": None,
             "assigned_ip": None,
             "client_ip": None,
-            "real_ip": real_ip
+            "real_ip": real_ip,
+            "is_captive_auth": is_captive_auth
         })
+
+
+# Known OS captive probe domains (matching probe requests hitting root '/')
+APPLE_PROBE_HOSTS = {
+    "captive.apple.com", "www.apple.com", "appleiphonecell.com",
+    "ibook.info", "itools.info", "airport.us", "thinkdifferent.us"
+}
+ANDROID_PROBE_HOSTS = {
+    "connectivitycheck.gstatic.com", "www.google.com", "play.googleapis.com",
+    "connectivitycheck.android.com", "clients3.google.com"
+}
+WINDOWS_PROBE_HOSTS = {
+    "www.msftconnecttest.com", "msftconnecttest.com", "www.msftncsi.com", "msftncsi.com",
+    "ipv6.msftconnecttest.com"
+}
+LINUX_PROBE_HOSTS = {
+    "detectportal.firefox.com", "nmcheck.gnome.org"
+}
+
+
+# ========== Page Routes ==========
+
+@app.get("/", response_class=HTMLResponse)
+async def index(request: Request, user: str = Depends(get_current_user)):
+    """Landing page - shows dashboard for logged-in users, captive detection or welcome for others"""
+    if user:
+        return templates.TemplateResponse("index.html", {"request": request, "user": user})
+    
+    host_header = request.headers.get("Host", "").lower().split(":")[0]
+    client_ip = get_real_client_ip(request)
+    
+    # Check if this is an OS captive portal probe requesting root '/'
+    if host_header in APPLE_PROBE_HOSTS:
+        if is_ip_captive_authenticated(client_ip):
+            return HTMLResponse(
+                content="<HTML><HEAD><TITLE>Success</TITLE></HEAD><BODY>Success</BODY></HTML>",
+                status_code=200
+            )
+        return RedirectResponse(url="/welcome", status_code=302)
+    elif host_header in ANDROID_PROBE_HOSTS:
+        if is_ip_captive_authenticated(client_ip):
+            return Response(status_code=204)
+        return RedirectResponse(url="/welcome", status_code=302)
+    elif host_header in WINDOWS_PROBE_HOSTS:
+        if is_ip_captive_authenticated(client_ip):
+            return PlainTextResponse("Microsoft Connect Test", status_code=200)
+        return RedirectResponse(url="/welcome", status_code=302)
+    elif host_header in LINUX_PROBE_HOSTS:
+        if is_ip_captive_authenticated(client_ip):
+            return PlainTextResponse("success\n", status_code=200)
+        return RedirectResponse(url="/welcome", status_code=302)
+    
+    return await render_welcome_page(request)
+
+
+@app.get("/welcome", response_class=HTMLResponse)
+async def welcome_page(request: Request):
+    """Explicit welcome and captive portal landing page"""
+    return await render_welcome_page(request)
+
+
+# ========== Captive Portal Probe Routes ==========
+
+@app.api_route("/generate_204", methods=["GET", "HEAD"])
+@app.api_route("/gen_204", methods=["GET", "HEAD"])
+@app.api_route("/mobile/status.php", methods=["GET", "HEAD"])
+async def android_captive_probe(request: Request):
+    """Android / ChromeOS / Xiaomi / Huawei captive portal probe endpoint"""
+    client_ip = get_real_client_ip(request)
+    if is_ip_captive_authenticated(client_ip):
+        return Response(status_code=204)
+    return RedirectResponse(url="/welcome", status_code=302)
+
+
+@app.api_route("/hotspot-detect.html", methods=["GET", "HEAD"])
+@app.api_route("/library/test/success.html", methods=["GET", "HEAD"])
+@app.api_route("/success.html", methods=["GET", "HEAD"])
+@app.api_route("/captive.apple.com/hotspot-detect.html", methods=["GET", "HEAD"])
+async def apple_captive_probe(request: Request):
+    """Apple iOS / macOS / iPadOS / watchOS Captive Network Assistant (CNA) probe endpoint"""
+    client_ip = get_real_client_ip(request)
+    if is_ip_captive_authenticated(client_ip):
+        return HTMLResponse(
+            content="<HTML><HEAD><TITLE>Success</TITLE></HEAD><BODY>Success</BODY></HTML>",
+            status_code=200
+        )
+    return RedirectResponse(url="/welcome", status_code=302)
+
+
+@app.api_route("/connecttest.txt", methods=["GET", "HEAD"])
+@app.api_route("/ncsi.txt", methods=["GET", "HEAD"])
+@app.api_route("/redirect", methods=["GET", "HEAD"])
+@app.api_route("/fwlink", methods=["GET", "HEAD"])
+@app.api_route("/fwlink/", methods=["GET", "HEAD"])
+async def windows_captive_probe(request: Request):
+    """Windows NCSI (Network Connectivity Status Indicator) probe endpoint"""
+    client_ip = get_real_client_ip(request)
+    if is_ip_captive_authenticated(client_ip):
+        path = request.url.path
+        if "ncsi" in path:
+            return PlainTextResponse("Microsoft NCSI", status_code=200)
+        return PlainTextResponse("Microsoft Connect Test", status_code=200)
+    return RedirectResponse(url="/welcome", status_code=302)
+
+
+@app.api_route("/success.txt", methods=["GET", "HEAD"])
+@app.api_route("/canonical.html", methods=["GET", "HEAD"])
+@app.api_route("/check_network_status.txt", methods=["GET", "HEAD"])
+async def linux_firefox_captive_probe(request: Request):
+    """Linux NetworkManager and Firefox captive portal probe endpoint"""
+    client_ip = get_real_client_ip(request)
+    if is_ip_captive_authenticated(client_ip):
+        path = request.url.path
+        if "check_network_status" in path:
+            return PlainTextResponse("NetworkManager is online\n", status_code=200)
+        return PlainTextResponse("success\n", status_code=200)
+    return RedirectResponse(url="/welcome", status_code=302)
+
+
+# ========== Captive Portal API Routes ==========
+
+@app.post("/api/captive/complete")
+async def api_captive_complete(request: Request):
+    """Authorize the client IP to access the Internet via captive portal"""
+    client_ip = get_real_client_ip(request)
+    set_ip_captive_authenticated(client_ip)
+    print(f"[CAPTIVE] Client IP '{client_ip}' successfully authorized for internet access")
+    return {
+        "success": True,
+        "authenticated": True,
+        "ip": client_ip,
+        "message": "Captive authentication successful"
+    }
+
+
+@app.get("/api/captive/status")
+async def api_captive_status(request: Request):
+    """Check captive portal authorization status for the requesting client IP"""
+    client_ip = get_real_client_ip(request)
+    authenticated = is_ip_captive_authenticated(client_ip)
+    return {
+        "authenticated": authenticated,
+        "ip": client_ip
+    }
 
 
 @app.get("/login", response_class=HTMLResponse)
@@ -1127,18 +1287,6 @@ async def api_kick_all_connections(
         "failed": failed
     }
 
-
-def is_valid_vpn_ip(ip: str) -> bool:
-    """Check if IP is a valid VPN client IP (192.168.43.0/24)"""
-    if not ip or ip == 'unknown':
-        return False
-    try:
-        import ipaddress
-        addr = ipaddress.ip_address(ip)
-        vpn_network = ipaddress.ip_network('192.168.43.0/24')
-        return addr in vpn_network and ip not in ('192.168.43.0', '192.168.43.255')
-    except ValueError:
-        return False
 
 
 @app.get("/api/debug/network-info")

@@ -273,6 +273,10 @@
             'welcome.stopped': '已停止',
             'welcome.diagnostics': '网络诊断',
             'welcome.adminPanel': '管理后台',
+            'welcome.continueInternet': '继续上网 / 接入互联网',
+            'welcome.authenticating': '正在接入互联网...',
+            'welcome.authenticated': '已成功接入互联网',
+            'welcome.authSuccess': '认证成功！您现已正常接入互联网，此窗口可直接关闭。',
         },
         en: {
             // App & Navigation
@@ -540,6 +544,10 @@
             'welcome.stopped': 'Stopped',
             'welcome.diagnostics': 'Network Diagnostics',
             'welcome.adminPanel': 'Admin Panel',
+            'welcome.continueInternet': 'Continue to Internet',
+            'welcome.authenticating': 'Connecting to Internet...',
+            'welcome.authenticated': 'Connected to Internet',
+            'welcome.authSuccess': 'Authentication successful! You can now access the Internet or close this window.',
         }
     };
 
