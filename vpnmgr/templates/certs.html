@@ -1,0 +1,703 @@
+{% extends "base.html" %}
+
+{% block title %}证书管理 - VPN Manager{% endblock %}
+{% block page_title %}<span data-i18n="certs.title">IKEv2 证书管理</span>{% endblock %}
+
+{% block content %}
+<div class="page-actions">
+    <button class="btn btn-primary" onclick="openAddCertModal()">
+        <i class="fas fa-plus"></i>
+        <span data-i18n="certs.generateCert">生成证书</span>
+    </button>
+</div>
+
+<div class="cert-info-banner">
+    <i class="fas fa-info-circle"></i>
+    <span data-i18n="certs.banner">
+        IKEv2 证书用于 iOS/macOS/Windows/Android 设备的 VPN 连接。
+        证书与系统用户 1:1 绑定，确保身份可信。
+    </span>
+</div>
+
+<div class="card">
+    <div class="card-header">
+        <h2><i class="fas fa-certificate"></i> <span data-i18n="certs.listTitle">证书列表</span></h2>
+        <button class="btn-icon" onclick="loadCerts()" data-i18n-title="common.refresh" title="刷新">
+            <i class="fas fa-sync-alt"></i>
+        </button>
+    </div>
+    <div class="card-body">
+        <table class="data-table" id="certs-table">
+            <thead>
+                <tr>
+                    <th data-i18n="certs.clientName">客户端名称</th>
+                    <th data-i18n="certs.boundUser">绑定用户</th>
+                    <th data-i18n="certs.status">状态</th>
+                    <th data-i18n="certs.createdAt">创建时间</th>
+                    <th data-i18n="certs.actions">操作</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr class="loading-row">
+                    <td colspan="5">
+                        <i class="fas fa-spinner fa-spin"></i>
+                        <span data-i18n="common.loading">加载中...</span>
+                    </td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Add Certificate Modal -->
+<div class="modal" id="add-cert-modal">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h3 data-i18n="certs.modalGenerateTitle">生成 IKEv2 证书</h3>
+            <button class="btn-close" onclick="closeModal('add-cert-modal')">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
+        <form id="add-cert-form">
+            <div class="modal-body">
+                <div class="form-group">
+                    <label for="cert-client-name" data-i18n="certs.inputCertName">证书名称 *</label>
+                    <input type="text" id="cert-client-name" required maxlength="100" 
+                           data-i18n-placeholder="certs.inputCertNamePlaceholder"
+                           placeholder="例如：ZhangsanVPN">
+                    <small data-i18n="certs.inputCertNameHint">建议使用有意义的名称，将与系统用户绑定</small>
+                </div>
+                
+                <div class="form-group">
+                    <label for="cert-bind-user" data-i18n="certs.selectUser">绑定到系统用户</label>
+                    <select id="cert-bind-user">
+                        <option value="" data-i18n="certs.selectUserPlaceholder">-- 选择用户 --</option>
+                    </select>
+                    <small data-i18n="certs.selectUserHint">选择要绑定此证书的系统用户（可选）</small>
+                </div>
+                
+                <div class="form-group">
+                    <label for="cert-description" data-i18n="common.description">描述</label>
+                    <input type="text" id="cert-description" maxlength="200" 
+                           data-i18n-placeholder="common.optional" placeholder="可选">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" onclick="closeModal('add-cert-modal')" data-i18n="common.cancel">取消</button>
+                <button type="submit" class="btn btn-primary">
+                    <i class="fas fa-cog fa-spin" style="display:none"></i>
+                    <i class="fas fa-certificate"></i>
+                    <span data-i18n="certs.generateCert">生成证书</span>
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Certificate Binding Modal -->
+<div class="modal" id="bind-cert-modal">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h3><span data-i18n="certs.modalBindTitle">证书绑定</span> - <span id="bind-cert-name"></span></h3>
+            <button class="btn-close" onclick="closeModal('bind-cert-modal')">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
+        <div class="modal-body">
+            <div class="form-group">
+                <label data-i18n="certs.currentBindStatus">当前绑定状态</label>
+                <div id="bind-current-status" class="binding-status"></div>
+            </div>
+            
+            <div class="form-group">
+                <label for="bind-select-user" data-i18n="certs.selectUser">绑定到系统用户</label>
+                <select id="bind-select-user">
+                    <option value="" data-i18n="certs.selectUserPlaceholder">-- 选择用户 --</option>
+                </select>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" onclick="closeModal('bind-cert-modal')" data-i18n="common.cancel">取消</button>
+            <button type="button" class="btn btn-danger" onclick="unbindCert()" id="btn-unbind" style="display:none">
+                <span data-i18n="certs.unbind">解除绑定</span>
+            </button>
+            <button type="button" class="btn btn-primary" onclick="saveCertBinding()">
+                <span data-i18n="common.save">保存绑定</span>
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- Download Certificate Modal -->
+<div class="modal" id="download-cert-modal">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h3 data-i18n="certs.certGenSuccess">证书生成成功</h3>
+            <button class="btn-close" onclick="closeModal('download-cert-modal')">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
+        <div class="modal-body">
+            <div class="cert-download-info">
+                <i class="fas fa-check-circle success-icon"></i>
+                <p data-i18n="certs.certGenSuccessTip">证书已成功生成！请下载并保存 .p12 文件。</p>
+                
+                <div class="cert-instructions">
+                    <h4 data-i18n="certs.installGuide">安装说明:</h4>
+                    <ul>
+                        <li data-i18n-html="certs.guideIos"><strong>iOS/macOS:</strong> 通过邮件或 AirDrop 发送 .p12 文件到设备，点击安装</li>
+                        <li data-i18n-html="certs.guideWin"><strong>Windows:</strong> 双击 .p12 文件，按向导导入到"个人"证书存储</li>
+                        <li data-i18n-html="certs.guideAndroid"><strong>Android:</strong> 在设置 -> 安全 -> 从存储安装证书</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" onclick="closeModal('download-cert-modal')" data-i18n="common.close">关闭</button>
+            <button type="button" class="btn btn-primary" id="download-btn" onclick="downloadGeneratedCert()">
+                <i class="fas fa-download"></i>
+                <span data-i18n="certs.downloadP12">下载 .p12 文件</span>
+            </button>
+        </div>
+    </div>
+</div>
+
+<style>
+.cert-info-banner {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    padding: 15px 20px;
+    border-radius: 8px;
+    margin-bottom: 20px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.cert-info-banner i {
+    font-size: 20px;
+}
+
+.cert-download-info {
+    text-align: center;
+    padding: 20px;
+}
+
+.success-icon {
+    font-size: 64px;
+    color: #28a745;
+    margin-bottom: 15px;
+}
+
+.cert-instructions {
+    text-align: left;
+    background: #f8f9fa;
+    padding: 15px;
+    border-radius: 8px;
+    margin-top: 20px;
+}
+
+.cert-instructions h4 {
+    margin-bottom: 10px;
+    color: #333;
+}
+
+.cert-instructions ul {
+    margin: 0;
+    padding-left: 20px;
+}
+
+.cert-instructions li {
+    margin: 8px 0;
+    line-height: 1.5;
+}
+
+.cert-instructions strong {
+    color: #667eea;
+}
+
+.cert-actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.cert-actions .btn-icon {
+    width: 32px;
+    height: 32px;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    cursor: pointer;
+    transition: all 0.2s;
+    background: #f0f0f0;
+    color: #666;
+}
+
+.cert-actions .btn-icon:hover {
+    background: #e0e0e0;
+    transform: translateY(-1px);
+}
+
+.cert-actions .btn-icon.danger {
+    background: #fee;
+    color: #dc3545;
+}
+
+.cert-actions .btn-icon.danger:hover {
+    background: #fcc;
+}
+
+.cert-actions .btn-icon.success {
+    background: #e8f5e9;
+    color: #28a745;
+}
+
+.cert-actions .btn-icon.success:hover {
+    background: #c8e6c9;
+}
+
+.binding-status {
+    padding: 10px;
+    border-radius: 6px;
+    background: #f5f5f5;
+}
+
+.binding-status.bound {
+    background: #e8f5e9;
+    color: #2e7d32;
+}
+
+.binding-status.unbound {
+    background: #fff3e0;
+    color: #ef6c00;
+}
+</style>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+let certs = [];
+let systemUsers = [];
+let currentCertData = null;
+let currentCertName = null;
+let currentBindingCert = null;
+
+// Load certificates
+async function loadCerts() {
+    const tbody = document.querySelector('#certs-table tbody');
+    tbody.innerHTML = `
+        <tr class="loading-row">
+            <td colspan="5">
+                <i class="fas fa-spinner fa-spin"></i>
+                ${t('common.loading')}
+            </td>
+        </tr>
+    `;
+    
+    // Load both certs and system users
+    await Promise.all([
+        loadCertsData(),
+        loadSystemUsers()
+    ]);
+    
+    renderCerts();
+}
+
+async function loadCertsData() {
+    try {
+        const response = await fetch('/api/certs', {
+            headers: getAuthHeaders()
+        });
+        
+        if (!response.ok) {
+            if (response.status === 401) {
+                window.location.href = '/login';
+                return;
+            }
+            throw new Error(t('common.failed'));
+        }
+        
+        certs = await response.json();
+    } catch (error) {
+        console.error('Error:', error);
+        certs = [];
+    }
+}
+
+async function loadSystemUsers() {
+    try {
+        const response = await fetch('/api/system-users', {
+            headers: getAuthHeaders()
+        });
+        if (response.ok) {
+            const data = await response.json();
+            systemUsers = data.users || [];
+        }
+    } catch (error) {
+        console.error('Failed to load system users:', error);
+        systemUsers = [];
+    }
+}
+
+// Get bound user for a certificate
+function getBoundUser(certName) {
+    return systemUsers.find(u => u.vpn_cert_name === certName);
+}
+
+// Render certificates table
+function renderCerts() {
+    const tbody = document.querySelector('#certs-table tbody');
+    
+    if (certs.length === 0) {
+        tbody.innerHTML = `
+            <tr class="empty-row">
+                <td colspan="5">${t('certs.noCerts')}</td>
+            </tr>
+        `;
+        return;
+    }
+    
+    tbody.innerHTML = certs.map(cert => {
+        const boundUser = getBoundUser(cert.client_name);
+        return `
+            <tr>
+                <td>
+                    <strong>${escapeHtml(cert.client_name)}</strong>
+                    ${cert.description ? `<br><small class="text-muted">${escapeHtml(cert.description)}</small>` : ''}
+                </td>
+                <td>
+                    ${boundUser 
+                        ? `<span class="badge badge-success"><i class="fas fa-user-check"></i> ${escapeHtml(boundUser.username)}</span>`
+                        : `<span class="badge badge-warning"><i class="fas fa-unlink"></i> ${t('certs.unbound')}</span>`
+                    }
+                </td>
+                <td>
+                    <span class="status-badge ${cert.is_active ? 'active' : 'inactive'}">
+                        ${cert.is_active ? t('common.active') : t('common.revoked')}
+                    </span>
+                </td>
+                <td>${formatDate(cert.created_at)}</td>
+                <td>
+                    <div class="cert-actions">
+                        <button class="btn-icon ${boundUser ? 'success' : ''}" onclick="openBindModal('${cert.client_name}')" title="${boundUser ? t('certs.viewBinding') : t('certs.bind')}">
+                            <i class="fas ${boundUser ? 'fa-user-check' : 'fa-user-plus'}"></i>
+                        </button>
+                        <button class="btn-icon" onclick="downloadCert('${cert.client_name}', 'p12')" title="${t('certs.download')} .p12 (Windows/Linux)">
+                            <i class="fab fa-windows"></i>
+                        </button>
+                        <button class="btn-icon" onclick="downloadCert('${cert.client_name}', 'mobileconfig')" title="${t('certs.download')} .mobileconfig (iOS/macOS)">
+                            <i class="fab fa-apple"></i>
+                        </button>
+                        <button class="btn-icon" onclick="downloadCert('${cert.client_name}', 'sswan')" title="${t('certs.download')} .sswan (Android)">
+                            <i class="fab fa-android"></i>
+                        </button>
+                        <button class="btn-icon danger" onclick="revokeCert('${cert.client_name}')" title="${t('certs.revoke')}">
+                            <i class="fas fa-ban"></i>
+                        </button>
+                    </div>
+                </td>
+            </tr>
+        `;
+    }).join('');
+}
+
+// Open bind modal
+async function openBindModal(certName) {
+    currentBindingCert = certName;
+    document.getElementById('bind-cert-name').textContent = certName;
+    
+    // Refresh users list
+    await loadSystemUsers();
+    
+    // Populate select
+    const select = document.getElementById('bind-select-user');
+    select.innerHTML = `<option value="">${t('certs.selectUserPlaceholder')}</option>`;
+    systemUsers.forEach(user => {
+        const option = document.createElement('option');
+        option.value = user.id;
+        option.textContent = user.username + (user.vpn_cert_name ? ` (${t('certs.boundUser')}:${user.vpn_cert_name})` : '');
+        select.appendChild(option);
+    });
+    
+    // Check current binding
+    const boundUser = getBoundUser(certName);
+    const statusDiv = document.getElementById('bind-current-status');
+    const btnUnbind = document.getElementById('btn-unbind');
+    
+    if (boundUser) {
+        statusDiv.innerHTML = `
+            <i class="fas fa-check-circle"></i> 
+            ${t('certs.boundToUser', { username: `<strong>${escapeHtml(boundUser.username)}</strong>` })}
+        `;
+        statusDiv.className = 'binding-status bound';
+        select.value = boundUser.id;
+        btnUnbind.style.display = 'inline-block';
+    } else {
+        statusDiv.innerHTML = `
+            <i class="fas fa-exclamation-circle"></i> 
+            ${t('certs.notBound')}
+        `;
+        statusDiv.className = 'binding-status unbound';
+        select.value = '';
+        btnUnbind.style.display = 'none';
+    }
+    
+    openModal('bind-cert-modal');
+}
+
+// Save cert binding
+async function saveCertBinding() {
+    const userId = document.getElementById('bind-select-user').value;
+    
+    if (!userId) {
+        showToast(t('certs.selectUserError'), 'error');
+        return;
+    }
+    
+    try {
+        const response = await fetch(`/api/system-users/${userId}`, {
+            method: 'PUT',
+            headers: getAuthHeaders(),
+            body: JSON.stringify({
+                vpn_cert_name: currentBindingCert
+            })
+        });
+        
+        const result = await response.json();
+        
+        if (response.ok) {
+            showToast(t('certs.bindSuccess'), 'success');
+            closeModal('bind-cert-modal');
+            loadCerts();
+        } else {
+            showToast(result.message || t('common.failed'), 'error');
+        }
+    } catch (error) {
+        showToast(t('common.failed') + ': ' + error.message, 'error');
+    }
+}
+
+// Unbind cert
+async function unbindCert() {
+    if (!confirm(t('certs.unbindConfirm', { clientName: currentBindingCert }))) {
+        return;
+    }
+    
+    const boundUser = getBoundUser(currentBindingCert);
+    if (!boundUser) return;
+    
+    try {
+        const response = await fetch(`/api/system-users/${boundUser.id}`, {
+            method: 'PUT',
+            headers: getAuthHeaders(),
+            body: JSON.stringify({
+                vpn_cert_name: null
+            })
+        });
+        
+        const result = await response.json();
+        
+        if (response.ok) {
+            showToast(t('certs.unbindSuccess'), 'success');
+            closeModal('bind-cert-modal');
+            loadCerts();
+        } else {
+            showToast(result.message || t('common.failed'), 'error');
+        }
+    } catch (error) {
+        showToast(t('common.failed') + ': ' + error.message, 'error');
+    }
+}
+
+// Open add cert modal
+async function openAddCertModal() {
+    document.getElementById('add-cert-form').reset();
+    await loadSystemUsers();
+    
+    // Populate select
+    const select = document.getElementById('cert-bind-user');
+    select.innerHTML = `<option value="">${t('certs.selectUserPlaceholder')}</option>`;
+    systemUsers.forEach(user => {
+        if (!user.vpn_cert_name) {  // Only show unbound users
+            const option = document.createElement('option');
+            option.value = user.id;
+            option.textContent = user.username;
+            select.appendChild(option);
+        }
+    });
+    
+    openModal('add-cert-modal');
+}
+
+// Add cert form submit
+document.getElementById('add-cert-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    
+    const submitBtn = e.target.querySelector('button[type="submit"]');
+    const spinner = submitBtn.querySelector('.fa-cog');
+    const icon = submitBtn.querySelector('.fa-certificate');
+    
+    submitBtn.disabled = true;
+    spinner.style.display = 'inline-block';
+    icon.style.display = 'none';
+    
+    const certName = document.getElementById('cert-client-name').value.trim();
+    const bindUserId = document.getElementById('cert-bind-user').value;
+    
+    try {
+        // 1. Generate certificate
+        const response = await fetch('/api/certs', {
+            method: 'POST',
+            headers: getAuthHeaders(),
+            body: JSON.stringify({
+                client_name: certName,
+                description: document.getElementById('cert-description').value.trim()
+            })
+        });
+        
+        const result = await response.json();
+        
+        if (!response.ok) {
+            throw new Error(result.message || t('common.failed'));
+        }
+        
+        currentCertData = result.p12_data;
+        currentCertName = certName;
+        
+        // 2. Bind to user if selected
+        if (bindUserId) {
+            await fetch(`/api/system-users/${bindUserId}`, {
+                method: 'PUT',
+                headers: getAuthHeaders(),
+                body: JSON.stringify({
+                    vpn_cert_name: certName
+                })
+            });
+        }
+        
+        closeModal('add-cert-modal');
+        openModal('download-cert-modal');
+        loadCerts();
+    } catch (error) {
+        showToast(t('common.failed') + ': ' + error.message, 'error');
+    } finally {
+        submitBtn.disabled = false;
+        spinner.style.display = 'none';
+        icon.style.display = 'inline-block';
+    }
+});
+
+// Download certificate (from modal)
+function downloadGeneratedCert() {
+    if (!currentCertData || !currentCertName) {
+        showToast(t('certs.noDownloadableCert'), 'error');
+        return;
+    }
+    
+    const blob = new Blob(
+        [Uint8Array.from(atob(currentCertData), c => c.charCodeAt(0))],
+        { type: 'application/x-pkcs12' }
+    );
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${currentCertName}.p12`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    
+    showToast(t('users.certDownloadStart'), 'success');
+}
+
+// Download certificate in specified format (from list)
+async function downloadCert(clientName, format) {
+    const formatNames = {
+        'p12': 'Windows/Linux (.p12)',
+        'mobileconfig': 'iOS/macOS (.mobileconfig)',
+        'sswan': 'Android (.sswan)'
+    };
+    
+    showToast(t('certs.downloadingFormat', { format: formatNames[format] }), 'info');
+    
+    try {
+        const response = await fetch(`/api/certs/${clientName}/download?format=${format}`, {
+            headers: getAuthHeaders()
+        });
+        
+        if (!response.ok) {
+            if (response.status === 401) {
+                window.location.href = '/login';
+                return;
+            }
+            throw new Error(t('users.downloadFailed'));
+        }
+        
+        const result = await response.json();
+        
+        if (result.success && result.data) {
+            const byteCharacters = atob(result.data);
+            const byteNumbers = new Array(byteCharacters.length);
+            for (let i = 0; i < byteCharacters.length; i++) {
+                byteNumbers[i] = byteCharacters.charCodeAt(i);
+            }
+            const byteArray = new Uint8Array(byteNumbers);
+            const blob = new Blob([byteArray], { type: result.content_type });
+            
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.download = result.filename;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            URL.revokeObjectURL(link.href);
+            
+            showToast(t('certs.downloadSuccess', { filename: result.filename }), 'success');
+        } else {
+            throw new Error(result.message || t('users.downloadFailed'));
+        }
+    } catch (error) {
+        console.error('Error:', error);
+        showToast(t('users.downloadFailed') + ': ' + error.message, 'error');
+    }
+}
+
+// Revoke certificate
+async function revokeCert(clientName) {
+    if (!confirm(t('certs.revokeConfirm', { clientName }))) {
+        return;
+    }
+    
+    try {
+        const response = await fetch(`/api/certs/${clientName}`, {
+            method: 'DELETE',
+            headers: getAuthHeaders()
+        });
+        
+        const result = await response.json();
+        
+        if (response.ok) {
+            showToast(t('certs.revokeSuccess'), 'success');
+            loadCerts();
+        } else {
+            showToast(result.message || t('common.failed'), 'error');
+        }
+    } catch (error) {
+        showToast(t('common.failed') + ': ' + error.message, 'error');
+    }
+}
+
+// React to language switch
+if (window.i18n) {
+    i18n.onChange(() => {
+        renderCerts();
+    });
+}
+
+// Load certs on page load
+loadCerts();
+</script>
+{% endblock %}

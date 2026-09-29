@@ -1,0 +1,284 @@
+{% extends "base.html" %}
+
+{% block title %}概览 - VPN Manager{% endblock %}
+{% block page_title %}<span data-i18n="dashboard.title">系统概览</span>{% endblock %}
+
+{% block content %}
+<!-- Stats Grid -->
+<div class="stats-grid">
+    <div class="stat-card">
+        <div class="stat-icon blue">
+            <svg class="icon-lg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M12 2v4m0 12v4M4.93 4.93l2.83 2.83m8.48 8.48l2.83 2.83M2 12h4m12 0h4M4.93 19.07l2.83-2.83m8.48-8.48l2.83-2.83"/>
+            </svg>
+        </div>
+        <div class="stat-info">
+            <div class="stat-label" data-i18n="dashboard.vpnStatus">VPN 服务状态</div>
+            <div class="stat-value" id="vpn-status">-</div>
+        </div>
+    </div>
+    
+    <div class="stat-card">
+        <div class="stat-icon green">
+            <svg class="icon-lg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+                <circle cx="9" cy="7" r="4"/>
+                <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
+                <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+            </svg>
+        </div>
+        <div class="stat-info">
+            <div class="stat-label" data-i18n="dashboard.totalUsers">总用户数</div>
+            <div class="stat-value" id="total-users">-</div>
+        </div>
+    </div>
+    
+    <div class="stat-card">
+        <div class="stat-icon orange">
+            <svg class="icon-lg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
+                <polyline points="22 4 12 14.01 9 11.01"/>
+            </svg>
+        </div>
+        <div class="stat-info">
+            <div class="stat-label" data-i18n="dashboard.onlineUsers">在线用户</div>
+            <div class="stat-value" id="online-users">-</div>
+        </div>
+    </div>
+    
+    <div class="stat-card">
+        <div class="stat-icon red">
+            <svg class="icon-lg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
+                <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
+            </svg>
+        </div>
+        <div class="stat-info">
+            <div class="stat-label" data-i18n="dashboard.activeConns">活跃连接</div>
+            <div class="stat-value" id="active-connections">-</div>
+        </div>
+    </div>
+</div>
+
+<!-- Active Connections -->
+<div class="card">
+    <div class="card-header">
+        <h2 class="card-title">
+            <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
+                <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
+            </svg>
+            <span data-i18n="dashboard.activeConns">活跃连接</span>
+        </h2>
+        <span class="badge badge-success">
+            <span class="badge-dot"></span>
+            <span data-i18n="dashboard.realtime">实时</span>
+        </span>
+    </div>
+    <div class="card-body">
+        <div class="table-container">
+            <table class="data-table" id="connections-table">
+                <thead>
+                    <tr>
+                        <th data-i18n="common.username">用户名</th>
+                        <th data-i18n="dashboard.clientIp">客户端 IP</th>
+                        <th data-i18n="dashboard.assignedIp">分配 IP</th>
+                        <th data-i18n="dashboard.tunnelType">隧道类型</th>
+                        <th data-i18n="dashboard.connId">连接 ID</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td colspan="5">
+                            <div class="empty-state">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                                    <circle cx="12" cy="12" r="10"/>
+                                    <path d="M8 12h8"/>
+                                </svg>
+                                <p data-i18n="dashboard.noConns">暂无活跃连接</p>
+                            </div>
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- Quick Actions -->
+<div class="card">
+    <div class="card-header">
+        <h2 class="card-title">
+            <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+            </svg>
+            <span data-i18n="common.actions">快捷操作</span>
+        </h2>
+    </div>
+    <div class="card-body">
+        <div class="quick-actions">
+            <a href="/users" class="quick-action">
+                <svg class="icon-lg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+                    <circle cx="8.5" cy="7" r="4"/>
+                    <line x1="20" y1="8" x2="20" y2="14"/>
+                    <line x1="23" y1="11" x2="17" y2="11"/>
+                </svg>
+                <span data-i18n="users.addUser">添加用户</span>
+            </a>
+            <a href="/users" class="quick-action">
+                <svg class="icon-lg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+                    <circle cx="9" cy="7" r="4"/>
+                    <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
+                    <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+                </svg>
+                <span data-i18n="nav.users">管理用户</span>
+            </a>
+            <a href="/logs" class="quick-action">
+                <svg class="icon-lg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                    <polyline points="14 2 14 8 20 8"/>
+                    <line x1="16" y1="13" x2="8" y2="13"/>
+                    <line x1="16" y1="17" x2="8" y2="17"/>
+                    <polyline points="10 9 9 9 8 9"/>
+                </svg>
+                <span data-i18n="nav.logs">查看日志</span>
+            </a>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+let ws;
+let reconnectInterval;
+let lastDashboardData = null;
+
+function escapeHtml(text) {
+    if (!text) return '';
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+function initWebSocket() {
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    ws = new WebSocket(`${protocol}//${window.location.host}/ws`);
+    
+    ws.onopen = () => {
+        console.log('[WS] Connected');
+        ws.send('status');
+    };
+    
+    ws.onmessage = (event) => {
+        const data = JSON.parse(event.data);
+        if (data.type === 'status') {
+            lastDashboardData = data.data;
+            updateDashboard(data.data);
+        }
+    };
+    
+    ws.onclose = () => {
+        console.log('[WS] Disconnected, retrying...');
+        setTimeout(initWebSocket, 5000);
+    };
+    
+    ws.onerror = (error) => {
+        console.error('[WS] Error:', error);
+    };
+}
+
+function updateDashboard(data) {
+    if (!data) return;
+    lastDashboardData = data;
+    
+    // VPN Status
+    const statusEl = document.getElementById('vpn-status');
+    if (data.container_running) {
+        statusEl.textContent = t('dashboard.running');
+        statusEl.className = 'stat-value success';
+    } else {
+        statusEl.textContent = t('dashboard.stopped');
+        statusEl.className = 'stat-value danger';
+    }
+    
+    // Active connections
+    const conns = data.active_connections || [];
+    document.getElementById('active-connections').textContent = conns.length;
+    document.getElementById('online-users').textContent = conns.length;
+    
+    // Update table
+    const tbody = document.querySelector('#connections-table tbody');
+    if (conns.length > 0) {
+        tbody.innerHTML = conns.map(conn => `
+            <tr>
+                <td><strong>${escapeHtml(conn.username)}</strong></td>
+                <td>${escapeHtml(conn.client_ip)}</td>
+                <td>${escapeHtml(conn.assigned_ip || '-')}</td>
+                <td><span class="badge badge-success">${escapeHtml(conn.tunnel)}</span></td>
+                <td>${escapeHtml(conn.id)}</td>
+            </tr>
+        `).join('');
+    } else {
+        tbody.innerHTML = `
+            <tr>
+                <td colspan="5">
+                    <div class="empty-state">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                            <circle cx="12" cy="12" r="10"/>
+                            <path d="M8 12h8"/>
+                        </svg>
+                        <p>${t('dashboard.noConns')}</p>
+                    </div>
+                </td>
+            </tr>
+        `;
+    }
+}
+
+async function loadStats() {
+    try {
+        const response = await fetch('/api/stats', {
+            headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+        });
+        
+        if (!response.ok) {
+            if (response.status === 401) {
+                window.location.href = '/login';
+                return;
+            }
+            throw new Error('Failed to load stats');
+        }
+        
+        const data = await response.json();
+        document.getElementById('total-users').textContent = data.total_users;
+        updateDashboard(data.vpn_status);
+    } catch (error) {
+        console.error('Error loading stats:', error);
+    }
+}
+
+// Re-render when language changes
+if (window.i18n) {
+    window.i18n.onChange(() => {
+        if (lastDashboardData) {
+            updateDashboard(lastDashboardData);
+        }
+    });
+}
+
+// Initialize
+initWebSocket();
+loadStats();
+
+// Refresh every 30 seconds
+setInterval(() => {
+    loadStats();
+    if (ws?.readyState === WebSocket.OPEN) {
+        ws.send('status');
+    }
+}, 30000);
+</script>
+{% endblock %}

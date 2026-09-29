@@ -1,0 +1,904 @@
+{% extends "base.html" %}
+
+{% block title %}用户管理 - VPN Manager{% endblock %}
+{% block page_title %}<span data-i18n="users.title">用户管理</span>{% endblock %}
+
+{% block content %}
+<div class="page-actions">
+    <button class="btn btn-primary" onclick="openAddUserModal()">
+        <i class="fas fa-plus"></i>
+        <span data-i18n="users.addUser">添加用户</span>
+    </button>
+</div>
+
+<div class="card">
+    <div class="card-header">
+        <h2><i class="fas fa-users"></i> <span data-i18n="users.title">用户列表</span></h2>
+        <div class="header-actions">
+            <span class="text-muted"><span id="user-count">0</span> <span data-i18n="nav.users">用户</span></span>
+            <button class="btn-icon-btn" onclick="loadUsers()" data-i18n-title="common.refresh" title="刷新">
+                <i class="fas fa-sync-alt"></i>
+            </button>
+        </div>
+    </div>
+    <div class="card-body">
+        <table class="data-table" id="users-table">
+            <thead>
+                <tr>
+                    <th data-i18n="users.tableUsername">用户名</th>
+                    <th data-i18n="users.tableVpnConfig">VPN 配置</th>
+                    <th data-i18n="users.tableStatus">状态</th>
+                    <th data-i18n="users.tableCreatedAt">创建时间</th>
+                    <th data-i18n="users.tableActions">操作</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr class="loading-row">
+                    <td colspan="5">
+                        <i class="fas fa-spinner fa-spin"></i>
+                        <span data-i18n="common.loading">加载中...</span>
+                    </td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Add/Edit User Modal -->
+<div class="modal" id="user-modal">
+    <div class="modal-content modal-large">
+        <div class="modal-header">
+            <h3 id="modal-title" data-i18n="users.addUser">添加用户</h3>
+            <button class="btn-close" onclick="closeModal('user-modal')">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
+        <form id="user-form">
+            <input type="hidden" id="user-id">
+            
+            <div class="modal-body">
+                <div class="form-section">
+                    <h4><i class="fas fa-user"></i> <span data-i18n="users.basicInfo">基本信息</span></h4>
+                    
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="username"><span data-i18n="common.username">用户名</span> *</label>
+                            <input type="text" id="username" required maxlength="50" 
+                                   data-i18n-placeholder="users.usernamePlaceholder"
+                                   placeholder="如：zhangsan" 
+                                   title="用户登录系统的用户名">
+                        </div>
+                        <div class="form-group">
+                            <label for="display-name" data-i18n="common.displayName">显示名称</label>
+                            <input type="text" id="display-name" maxlength="50" data-i18n-placeholder="users.displayNamePlaceholder" placeholder="如：张三">
+                        </div>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="password"><span data-i18n="common.password">密码</span> * <small id="password-hint" data-i18n="users.passwordHint">（留空则不修改）</small></label>
+                        <div class="input-with-btn">
+                            <input type="text" id="password" data-i18n-placeholder="users.passwordPlaceholder" required>
+                            <button type="button" class="btn-secondary" onclick="generatePassword()">
+                                <i class="fas fa-random"></i> <span data-i18n="common.random">随机生成</span>
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="email" data-i18n="common.email">邮箱</label>
+                        <input type="email" id="email" data-i18n-placeholder="users.emailPlaceholder" placeholder="可选">
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="description" data-i18n="common.notes">备注</label>
+                        <input type="text" id="description" maxlength="200" data-i18n-placeholder="users.notesPlaceholder" placeholder="可选">
+                    </div>
+                    
+                    <div class="form-group checkbox-group">
+                        <label>
+                            <input type="checkbox" id="is-admin">
+                            <span data-i18n="users.adminPrivilege">管理员权限</span>
+                        </label>
+                    </div>
+                </div>
+                
+                <div class="form-section">
+                    <h4><i class="fas fa-shield-alt"></i> <span data-i18n="users.vpnConfig">VPN 身份配置</span></h4>
+                    <p class="section-desc">每个用户对应唯一的 VPN 身份，用于连接 VPN 服务器</p>
+                    
+                    <!-- IKEv2 Certificate -->
+                    <div class="vpn-config-box">
+                        <div class="vpn-config-header">
+                            <h5><i class="fas fa-certificate"></i> <span data-i18n="users.certStatus">IKEv2 证书</span></h5>
+                            <span class="status-badge" id="cert-status" data-i18n="common.notConfigured">未配置</span>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label data-i18n="users.certName">证书名称</label>
+                            <div class="input-with-btn" id="cert-input-group">
+                                <input type="text" id="cert-name" maxlength="100" 
+                                       data-i18n-placeholder="users.certNamePlaceholder"
+                                       placeholder="如：ZhangsanVPN">
+                                <button type="button" class="btn-secondary" onclick="generateCertName()">
+                                    <i class="fas fa-magic"></i> <span data-i18n="common.random">自动生成</span>
+                                </button>
+                            </div>
+                            <small data-i18n="users.certNameHint">建议使用 "用户名+VPN" 格式，如 zhangsan_vpn</small>
+                        </div>
+                        
+                        <div id="cert-actions" style="display:none; margin-top: 10px;">
+                            <button type="button" class="btn btn-success btn-sm" onclick="generateNewCert()">
+                                <i class="fas fa-certificate"></i> <span data-i18n="users.generateNewCert">生成新证书</span>
+                            </button>
+                            <button type="button" class="btn btn-secondary btn-sm" onclick="downloadUserCert()">
+                                <i class="fas fa-download"></i> <span data-i18n="users.downloadCert">下载证书</span>
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <!-- L2TP/XAuth -->
+                    <div class="vpn-config-box">
+                        <div class="vpn-config-header">
+                            <h5><i class="fas fa-key"></i> <span data-i18n="users.vpnUserStatus">L2TP / XAuth 账号</span></h5>
+                            <span class="status-badge" id="vpn-user-status" data-i18n="common.notConfigured">未配置</span>
+                        </div>
+                        
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label data-i18n="users.vpnUsername">VPN 用户名</label>
+                                <input type="text" id="vpn-username" maxlength="50" 
+                                       data-i18n-placeholder="users.vpnUsernamePlaceholder"
+                                       placeholder="如：zhangsan_vpn">
+                            </div>
+                            <div class="form-group">
+                                <label data-i18n="users.vpnPassword">VPN 密码</label>
+                                <div class="input-with-btn">
+                                    <input type="text" id="vpn-password" data-i18n-placeholder="users.vpnPasswordPlaceholder">
+                                    <button type="button" class="btn-secondary" 
+                                            onclick="generatePassword('vpn-password')">
+                                        <i class="fas fa-random"></i>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" onclick="closeModal('user-modal')" data-i18n="common.cancel">取消</button>
+                <button type="submit" class="btn btn-primary">
+                    <i class="fas fa-save"></i>
+                    <span id="submit-btn-text" data-i18n="common.save">保存</span>
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- User Detail Modal -->
+<div class="modal" id="user-detail-modal">
+    <div class="modal-content modal-large">
+        <div class="modal-header">
+            <h3><span data-i18n="users.viewUser">用户详情</span> - <span id="detail-username"></span></h3>
+            <button class="btn-close" onclick="closeModal('user-detail-modal')">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
+        <div class="modal-body" id="user-detail-content">
+            <!-- Content loaded dynamically -->
+        </div>
+    </div>
+</div>
+
+<style>
+.modal-large {
+    max-width: 700px;
+}
+
+.form-section {
+    margin-bottom: 24px;
+    padding-bottom: 24px;
+    border-bottom: 1px solid #eee;
+}
+
+.form-section:last-child {
+    border-bottom: none;
+    margin-bottom: 0;
+    padding-bottom: 0;
+}
+
+.form-section h4 {
+    margin-bottom: 16px;
+    color: #333;
+    font-size: 1.1em;
+}
+
+.section-desc {
+    color: #666;
+    font-size: 0.9em;
+    margin-bottom: 16px;
+}
+
+.form-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+}
+
+.vpn-config-box {
+    background: #f8f9fa;
+    border-radius: 8px;
+    padding: 16px;
+    margin-bottom: 16px;
+}
+
+.vpn-config-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+}
+
+.vpn-config-header h5 {
+    margin: 0;
+    font-size: 1em;
+    color: #444;
+}
+
+.checkbox-group label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+}
+
+.checkbox-group input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+}
+
+.header-actions {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+}
+
+.user-vpn-info {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.vpn-icon {
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.2s;
+    font-size: 14px;
+}
+
+.cert-icon {
+    background: #dbeafe;
+    color: #2563eb;
+}
+
+.cert-icon:hover {
+    background: #2563eb;
+    color: white;
+}
+
+.key-icon {
+    background: #fef3c7;
+    color: #f59e0b;
+    border: 1px solid #fcd34d;
+}
+
+.key-icon:hover {
+    background: #f59e0b;
+    color: white;
+}
+
+/* Tooltip styles */
+[title] {
+    position: relative;
+}
+
+[title]:hover::after {
+    content: attr(title);
+    position: absolute;
+    bottom: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    padding: 6px 10px;
+    background: #1e293b;
+    color: white;
+    font-size: 12px;
+    border-radius: 6px;
+    white-space: nowrap;
+    z-index: 1000;
+    margin-bottom: 6px;
+}
+
+[title]:hover::before {
+    content: '';
+    position: absolute;
+    bottom: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    border: 4px solid transparent;
+    border-top-color: #1e293b;
+    margin-bottom: 2px;
+    z-index: 1000;
+}
+
+.online-indicator {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.online-indicator.online {
+    color: #28a745;
+}
+
+.online-indicator.offline {
+    color: #6c757d;
+}
+
+.online-indicator .dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: currentColor;
+}
+
+.online-indicator.online .dot {
+    animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+    0% { opacity: 1; }
+    50% { opacity: 0.5; }
+    100% { opacity: 1; }
+}
+
+@keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
+</style>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+let users = [];
+let activeConnections = [];
+let editingUser = null;
+
+// Load users
+async function loadUsers() {
+    const tbody = document.querySelector('#users-table tbody');
+    tbody.innerHTML = `
+        <tr class="loading-row">
+            <td colspan="5">
+                <i class="fas fa-spinner fa-spin"></i>
+                ${t('common.loading')}
+            </td>
+        </tr>
+    `;
+    
+    // 同时加载用户和连接状态
+    await Promise.all([
+        loadUsersData(),
+        loadActiveConnections()
+    ]);
+    
+    renderUsers();
+}
+
+async function loadUsersData() {
+    try {
+        const response = await fetch('/api/system-users', {
+            headers: getAuthHeaders()
+        });
+        
+        if (!response.ok) {
+            if (response.status === 401) {
+                window.location.href = '/login';
+                return;
+            }
+            throw new Error(t('common.failed'));
+        }
+        
+        const data = await response.json();
+        users = data.users || [];
+        document.getElementById('user-count').textContent = users.length;
+    } catch (error) {
+        console.error('Error:', error);
+        users = [];
+    }
+}
+
+async function loadActiveConnections() {
+    try {
+        const response = await fetch('/api/status', {
+            headers: getAuthHeaders()
+        });
+        if (response.ok) {
+            const data = await response.json();
+            activeConnections = data.active_connections || [];
+        }
+    } catch (error) {
+        activeConnections = [];
+    }
+}
+
+// Check if user is online
+function isUserOnline(user) {
+    if (!user.vpn_cert_name && !user.vpn_username) return false;
+    
+    return activeConnections.some(conn => {
+        return conn.username === user.vpn_cert_name || 
+               conn.username === user.vpn_username;
+    });
+}
+
+// Get user's VPN IP
+function getUserVpnIp(user) {
+    const conn = activeConnections.find(c => {
+        return c.username === user.vpn_cert_name || 
+               c.username === user.vpn_username;
+    });
+    return conn ? conn.assigned_ip : null;
+}
+
+// Render users table
+function renderUsers() {
+    const tbody = document.querySelector('#users-table tbody');
+    
+    if (users.length === 0) {
+        tbody.innerHTML = `
+            <tr class="empty-row">
+                <td colspan="5">${t('users.noUsers')}</td>
+            </tr>
+        `;
+        return;
+    }
+    
+    tbody.innerHTML = users.map(user => {
+        const isOnline = isUserOnline(user);
+        const vpnIp = getUserVpnIp(user);
+        
+        return `
+            <tr>
+                <td>
+                    <strong>${escapeHtml(user.username)}</strong>
+                    ${user.is_admin ? `<span class="badge badge-primary">${t('users.roleAdmin')}</span>` : ''}
+                    ${user.display_name ? `<br><small class="text-muted">${escapeHtml(user.display_name)}</small>` : ''}
+                </td>
+                <td>
+                    <div class="user-vpn-info">
+                        ${user.vpn_cert_name 
+                            ? `<span class="vpn-icon cert-icon" title="${t('users.vpnCertTip', { name: escapeHtml(user.vpn_cert_name) })}">
+                                <i class="fas fa-certificate"></i>
+                               </span>`
+                            : ''
+                        }
+                        ${user.vpn_username 
+                            ? `<span class="vpn-icon key-icon" title="${t('users.vpnUserTip', { name: escapeHtml(user.vpn_username) })}">
+                                <i class="fas fa-key"></i>
+                               </span>`
+                            : ''
+                        }
+                        ${!user.vpn_cert_name && !user.vpn_username ? '<span class="text-muted">-</span>' : ''}
+                    </div>
+                </td>
+                <td>
+                    ${isOnline 
+                        ? `<span class="online-indicator online">
+                            <span class="dot"></span>
+                            ${t('common.online')} ${vpnIp ? `<code>${vpnIp}</code>` : ''}
+                           </span>`
+                        : `<span class="online-indicator offline">
+                            <span class="dot"></span>
+                            ${t('common.offline')}
+                           </span>`
+                    }
+                </td>
+                <td>${formatDate(user.created_at)}</td>
+                <td>
+                    <button class="btn-icon-btn" onclick='viewUserDetail(${JSON.stringify(user)})' title="${t('common.viewDetails')}">
+                        <i class="fas fa-eye"></i>
+                    </button>
+                    <button class="btn-icon-btn" onclick='openEditUserModal(${JSON.stringify(user)})' title="${t('common.edit')}">
+                        <i class="fas fa-edit"></i>
+                    </button>
+                    ${user.username === 'admin' ? '' : `
+                    <button class="btn-icon-btn danger" onclick="deleteUser(${user.id}, '${escapeHtml(user.username)}')" title="${t('common.delete')}">
+                        <i class="fas fa-trash"></i>
+                    </button>
+                    `}
+                </td>
+            </tr>
+        `;
+    }).join('');
+}
+
+// Open add user modal
+function openAddUserModal() {
+    editingUser = null;
+    document.getElementById('user-form').reset();
+    document.getElementById('user-id').value = '';
+    document.getElementById('modal-title').textContent = t('users.addUser');
+    document.getElementById('submit-btn-text').textContent = t('common.save');
+    document.getElementById('password-hint').style.display = 'none';
+    document.getElementById('password').required = true;
+    document.getElementById('username').disabled = false;
+    
+    // Reset VPN config status
+    document.getElementById('cert-status').textContent = t('common.notConfigured');
+    document.getElementById('cert-status').className = 'status-badge';
+    document.getElementById('vpn-user-status').textContent = t('common.notConfigured');
+    document.getElementById('vpn-user-status').className = 'status-badge';
+    document.getElementById('cert-actions').style.display = 'none';
+    
+    openModal('user-modal');
+}
+
+// Open edit user modal
+function openEditUserModal(user) {
+    editingUser = user;
+    document.getElementById('user-form').reset();
+    
+    document.getElementById('user-id').value = user.id;
+    document.getElementById('username').value = user.username;
+    document.getElementById('username').disabled = true;  // 用户名不可修改
+    document.getElementById('display-name').value = user.display_name || '';
+    document.getElementById('email').value = user.email || '';
+    document.getElementById('description').value = user.description || '';
+    document.getElementById('is-admin').checked = user.is_admin;
+    
+    // VPN config
+    document.getElementById('cert-name').value = user.vpn_cert_name || '';
+    document.getElementById('vpn-username').value = user.vpn_username || '';
+    document.getElementById('vpn-password').value = '';
+    
+    // Update status badges
+    if (user.vpn_cert_name) {
+        document.getElementById('cert-status').textContent = t('common.configured');
+        document.getElementById('cert-status').className = 'status-badge active';
+        document.getElementById('cert-actions').style.display = 'block';
+    } else {
+        document.getElementById('cert-status').textContent = t('common.notConfigured');
+        document.getElementById('cert-status').className = 'status-badge';
+        document.getElementById('cert-actions').style.display = 'none';
+    }
+    
+    if (user.vpn_username) {
+        document.getElementById('vpn-user-status').textContent = t('common.configured');
+        document.getElementById('vpn-user-status').className = 'status-badge active';
+    } else {
+        document.getElementById('vpn-user-status').textContent = t('common.notConfigured');
+        document.getElementById('vpn-user-status').className = 'status-badge';
+    }
+    
+    document.getElementById('modal-title').textContent = t('users.editUser');
+    document.getElementById('submit-btn-text').textContent = t('common.save');
+    document.getElementById('password-hint').style.display = 'inline';
+    document.getElementById('password').required = false;
+    
+    openModal('user-modal');
+}
+
+// View user detail
+async function viewUserDetail(user) {
+    document.getElementById('detail-username').textContent = user.username;
+    
+    const isOnline = isUserOnline(user);
+    const vpnIp = getUserVpnIp(user);
+    
+    let html = `
+        <div class="user-detail-section">
+            <h4>${t('users.basicInfo')}</h4>
+            <div class="info-list">
+                <div class="info-row">
+                    <span class="info-label">${t('common.username')}:</span>
+                    <span class="info-value">${escapeHtml(user.username)}</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">${t('common.displayName')}:</span>
+                    <span class="info-value">${escapeHtml(user.display_name || '-')}</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">${t('common.email')}:</span>
+                    <span class="info-value">${escapeHtml(user.email || '-')}</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">${t('common.role')}:</span>
+                    <span class="info-value">${user.is_admin ? t('users.roleAdmin') : t('users.roleUser')}</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">${t('common.status')}:</span>
+                    <span class="info-value">${user.is_active ? t('common.enabled') : t('common.disabled')}</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">${t('common.notes')}:</span>
+                    <span class="info-value">${escapeHtml(user.description || '-')}</span>
+                </div>
+            </div>
+        </div>
+        
+        <div class="user-detail-section">
+            <h4>${t('users.vpnStatus')}</h4>
+            <div class="info-list">
+                <div class="info-row">
+                    <span class="info-label">${t('common.status')}:</span>
+                    <span class="info-value">
+                        ${isOnline 
+                            ? `<span class="badge badge-success"><i class="fas fa-circle"></i> ${t('common.online')}</span>`
+                            : `<span class="badge badge-secondary">${t('common.offline')}</span>`
+                        }
+                    </span>
+                </div>
+                ${vpnIp ? `
+                <div class="info-row">
+                    <span class="info-label">${t('users.assignedIp')}:</span>
+                    <span class="info-value"><code>${vpnIp}</code></span>
+                </div>
+                ` : ''}
+            </div>
+        </div>
+    `;
+    
+    if (user.vpn_cert_name) {
+        html += `
+            <div class="user-detail-section">
+                <h4>${t('users.certStatus')}</h4>
+                <div class="info-list">
+                    <div class="info-row">
+                        <span class="info-label">${t('certs.clientName')}:</span>
+                        <span class="info-value">${escapeHtml(user.vpn_cert_name)}</span>
+                    </div>
+                </div>
+                <div class="detail-actions" style="margin-top: 16px; display: flex; gap: 8px;">
+                    <button class="btn btn-primary btn-sm" onclick="downloadCertForUser('${user.vpn_cert_name}')">
+                        <i class="fas fa-download"></i> ${t('users.downloadCertP12')}
+                    </button>
+                    <button class="btn btn-secondary btn-sm" onclick="downloadCertForUser('${user.vpn_cert_name}', 'mobileconfig')">
+                        <i class="fab fa-apple"></i> ${t('users.downloadCertProfile')}
+                    </button>
+                </div>
+            </div>
+        `;
+    }
+    
+    if (user.vpn_username) {
+        html += `
+            <div class="user-detail-section">
+                <h4>${t('users.vpnUserStatus')}</h4>
+                <div class="info-list">
+                    <div class="info-row">
+                        <span class="info-label">${t('common.username')}:</span>
+                        <span class="info-value">${escapeHtml(user.vpn_username)}</span>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+    
+    document.getElementById('user-detail-content').innerHTML = html;
+    openModal('user-detail-modal');
+}
+
+// Generate random password
+function generatePassword(fieldId = 'password') {
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*';
+    let password = '';
+    for (let i = 0; i < 16; i++) {
+        password += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    document.getElementById(fieldId).value = password;
+}
+
+// Generate cert name based on username
+function generateCertName() {
+    const username = document.getElementById('username').value;
+    if (username) {
+        document.getElementById('cert-name').value = username + '_vpn';
+    }
+}
+
+// Generate new certificate for user
+async function generateNewCert() {
+    const certName = document.getElementById('cert-name').value.trim();
+    if (!certName) {
+        showToast(t('users.certPrompt'), 'error');
+        return;
+    }
+    
+    if (!confirm(t('users.generateCertConfirm', { certName }))) {
+        return;
+    }
+    
+    try {
+        const response = await fetch('/api/certs', {
+            method: 'POST',
+            headers: getAuthHeaders(),
+            body: JSON.stringify({
+                client_name: certName,
+                description: `Certificate for user ${editingUser?.username || 'new user'}`
+            })
+        });
+        
+        const result = await response.json();
+        
+        if (response.ok) {
+            showToast(t('users.generateCertSuccess'), 'success');
+            document.getElementById('cert-status').textContent = t('common.configured');
+            document.getElementById('cert-status').className = 'status-badge active';
+            document.getElementById('cert-actions').style.display = 'block';
+            
+            // Store cert data for download
+            window._generatedCert = {
+                name: certName,
+                data: result.p12_data
+            };
+        } else {
+            showToast(result.message || t('common.failed'), 'error');
+        }
+    } catch (error) {
+        showToast(t('common.failed') + ': ' + error.message, 'error');
+    }
+}
+
+// Download user's certificate
+function downloadUserCert() {
+    const certName = document.getElementById('cert-name').value;
+    if (window._generatedCert && window._generatedCert.name === certName) {
+        // Download generated cert
+        const blob = new Blob(
+            [Uint8Array.from(atob(window._generatedCert.data), c => c.charCodeAt(0))],
+            { type: 'application/x-pkcs12' }
+        );
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${certName}.p12`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        showToast(t('users.certDownloadStart'), 'success');
+    } else if (editingUser && editingUser.vpn_cert_name) {
+        // Download existing cert
+        downloadCertForUser(editingUser.vpn_cert_name);
+    }
+}
+
+// Download certificate in specified format
+async function downloadCertForUser(certName, format = 'p12') {
+    try {
+        const response = await fetch(`/api/certs/${certName}/download?format=${format}`, {
+            headers: getAuthHeaders()
+        });
+        
+        if (!response.ok) throw new Error(t('users.downloadFailed'));
+        
+        const result = await response.json();
+        
+        if (result.success && result.data) {
+            const byteCharacters = atob(result.data);
+            const byteNumbers = new Array(byteCharacters.length);
+            for (let i = 0; i < byteCharacters.length; i++) {
+                byteNumbers[i] = byteCharacters.charCodeAt(i);
+            }
+            const byteArray = new Uint8Array(byteNumbers);
+            const blob = new Blob([byteArray], { type: result.content_type });
+            
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.download = result.filename;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            URL.revokeObjectURL(link.href);
+            
+            showToast(t('common.success'), 'success');
+        }
+    } catch (error) {
+        showToast(t('users.downloadFailed') + ': ' + error.message, 'error');
+    }
+}
+
+// Form submit handler
+document.getElementById('user-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    
+    const userId = document.getElementById('user-id').value;
+    const isEdit = !!userId;
+    
+    const data = {
+        username: document.getElementById('username').value.trim(),
+        display_name: document.getElementById('display-name').value.trim() || null,
+        email: document.getElementById('email').value.trim() || null,
+        description: document.getElementById('description').value.trim() || null,
+        is_admin: document.getElementById('is-admin').checked,
+        vpn_cert_name: document.getElementById('cert-name').value.trim() || null,
+        vpn_username: document.getElementById('vpn-username').value.trim() || null,
+    };
+    
+    const password = document.getElementById('password').value;
+    if (password) {
+        data.password = password;
+    }
+    
+    const vpnPassword = document.getElementById('vpn-password').value;
+    if (vpnPassword) {
+        data.vpn_password = vpnPassword;
+    }
+    
+    try {
+        const url = isEdit ? `/api/system-users/${userId}` : '/api/system-users';
+        const method = isEdit ? 'PUT' : 'POST';
+        
+        const response = await fetch(url, {
+            method: method,
+            headers: getAuthHeaders(),
+            body: JSON.stringify(data)
+        });
+        
+        const result = await response.json();
+        
+        if (response.ok) {
+            showToast(t(isEdit ? 'users.updateSuccess' : 'users.createSuccess'), 'success');
+            closeModal('user-modal');
+            loadUsers();
+        } else {
+            showToast(result.message || t('common.failed'), 'error');
+        }
+    } catch (error) {
+        showToast(t('common.failed') + ': ' + error.message, 'error');
+    }
+});
+
+// Delete user
+async function deleteUser(userId, username) {
+    if (!confirm(t('users.deleteConfirm', { username }))) {
+        return;
+    }
+    
+    try {
+        const response = await fetch(`/api/system-users/${userId}`, {
+            method: 'DELETE',
+            headers: getAuthHeaders()
+        });
+        
+        const result = await response.json();
+        
+        if (response.ok) {
+            showToast(result.message || t('users.deleteSuccess'), 'success');
+            loadUsers();
+        } else {
+            showToast(result.message || t('common.failed'), 'error');
+        }
+    } catch (error) {
+        showToast(t('common.failed') + ': ' + error.message, 'error');
+    }
+}
+
+// React to language switch
+if (window.i18n) {
+    i18n.onChange(() => {
+        renderUsers();
+    });
+}
+
+// Load on page load
+loadUsers();
+</script>
+{% endblock %}

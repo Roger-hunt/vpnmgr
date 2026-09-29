@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title data-i18n="welcome.title">欢迎 - VPN Manager</title>
+    <script src="/static/js/i18n.js"></script>
+    <style>
+        .welcome-card {
+            position: relative;
+        }
+        .lang-switch-welcome {
+            position: absolute;
+            top: 16px;
+            right: 16px;
+            background: rgba(255, 255, 255, 0.9);
+            border: 1px solid var(--gray-200);
+            border-radius: 20px;
+            padding: 4px 12px;
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--gray-700);
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            box-shadow: var(--shadow);
+            transition: all 0.2s;
+            z-index: 10;
+        }
+        .lang-switch-welcome:hover {
+            background: white;
+            border-color: var(--primary-500);
+            color: var(--primary-600);
+            transform: scale(1.03);
+        }
+        :root {
+            --primary-50: #eff6ff;
+            --primary-100: #dbeafe;
+            --primary-200: #bfdbfe;
+            --primary-500: #3b82f6;
+            --primary-600: #2563eb;
+            --primary-700: #1d4ed8;
+            --gray-50: #f8fafc;
+            --gray-100: #f1f5f9;
+            --gray-200: #e2e8f0;
+            --gray-300: #cbd5e1;
+            --gray-400: #94a3b8;
+            --gray-500: #64748b;
+            --gray-600: #475569;
+            --gray-700: #334155;
+            --gray-800: #1e293b;
+            --success: #10b981;
+            --success-light: #d1fae5;
+            --radius: 10px;
+            --radius-lg: 16px;
+            --radius-xl: 24px;
+            --shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1);
+            --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+            --shadow-xl: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        html {
+            font-size: 16px;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            min-height: 100vh;
+            min-height: 100dvh;
+            background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 50%, #dbeafe 100%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        .welcome-container {
+            width: 100%;
+            max-width: 420px;
+            animation: fadeIn 0.6s ease;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .welcome-card {
+            background: white;
+            border-radius: var(--radius-xl);
+            padding: 40px 32px;
+            box-shadow: var(--shadow-xl);
+            text-align: center;
+        }
+
+        .status-icon {
+            width: 80px;
+            height: 80px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 auto 24px;
+        }
+
+        .status-icon.online {
+            background: var(--success-light);
+            color: var(--success);
+            animation: pulse 2s infinite;
+        }
+
+        .status-icon.offline {
+            background: var(--gray-100);
+            color: var(--gray-400);
+        }
+
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.4); }
+            50% { transform: scale(1.05); box-shadow: 0 0 0 20px rgba(16, 185, 129, 0); }
+        }
+
+        .welcome-title {
+            font-size: 1.75rem;
+            font-weight: 700;
+            color: var(--gray-800);
+            margin-bottom: 24px;
+        }
+
+        .status-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 16px;
+            border-radius: 9999px;
+            font-size: 0.875rem;
+            font-weight: 600;
+            margin-bottom: 24px;
+        }
+
+        .status-badge.online {
+            background: var(--success-light);
+            color: var(--success);
+        }
+
+        .status-badge.offline {
+            background: var(--gray-100);
+            color: var(--gray-500);
+        }
+
+        .info-card {
+            background: var(--gray-50);
+            border-radius: var(--radius-lg);
+            padding: 20px;
+            margin-bottom: 24px;
+            text-align: left;
+        }
+
+        .info-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 0;
+            border-bottom: 1px solid var(--gray-200);
+        }
+
+        .info-row:last-child {
+            border-bottom: none;
+        }
+
+        .info-label {
+            font-size: 0.875rem;
+            color: var(--gray-500);
+            font-weight: 500;
+        }
+
+        .info-value {
+            font-size: 0.9375rem;
+            color: var(--gray-800);
+            font-weight: 600;
+            font-family: 'SF Mono', Monaco, monospace;
+        }
+
+        .info-value.success {
+            color: var(--success);
+        }
+
+        .info-value.highlight {
+            color: var(--primary-600);
+        }
+
+        .empty-state {
+            padding: 32px;
+            text-align: center;
+            color: var(--gray-400);
+        }
+
+        .empty-state svg {
+            width: 48px;
+            height: 48px;
+            margin-bottom: 12px;
+            opacity: 0.5;
+        }
+
+        .action-buttons {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .btn {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            padding: 14px 24px;
+            border-radius: var(--radius);
+            font-size: 0.9375rem;
+            font-weight: 600;
+            text-decoration: none;
+            transition: all 0.2s;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, var(--primary-500), var(--primary-700));
+            color: white;
+            box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 20px rgba(59, 130, 246, 0.4);
+        }
+
+        .btn-secondary {
+            background: var(--gray-100);
+            color: var(--gray-700);
+            border: 1px solid var(--gray-200);
+        }
+
+        .btn-secondary:hover {
+            background: var(--gray-200);
+        }
+
+        .welcome-footer {
+            margin-top: 24px;
+            padding-top: 24px;
+            border-top: 1px solid var(--gray-200);
+            font-size: 0.875rem;
+            color: var(--gray-400);
+        }
+
+        /* Mobile */
+        @media (max-width: 480px) {
+            html {
+                font-size: 15px;
+            }
+
+            body {
+                padding: 16px;
+                align-items: flex-start;
+                padding-top: 32px;
+            }
+
+            .welcome-card {
+                padding: 32px 24px;
+                border-radius: var(--radius-lg);
+            }
+
+            .status-icon {
+                width: 64px;
+                height: 64px;
+            }
+
+            .welcome-title {
+                font-size: 1.5rem;
+            }
+        }
+
+        @supports (padding: max(0px)) {
+            body {
+                padding-left: max(20px, env(safe-area-inset-left));
+                padding-right: max(20px, env(safe-area-inset-right));
+                padding-bottom: max(20px, env(safe-area-inset-bottom));
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="welcome-container">
+        <div class="welcome-card">
+            <button class="lang-switch-welcome" onclick="i18n.toggleLanguage()" title="Switch Language">
+                <span class="current-lang-text">EN</span>
+            </button>
+            {% if is_connected %}
+            <!-- Connected State -->
+            <div class="status-icon online">
+                <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
+                    <polyline points="22 4 12 14.01 9 11.01"/>
+                </svg>
+            </div>
+            
+            <h1 class="welcome-title" data-i18n="welcome.brandTitle">VPN Manager</h1>
+            
+            <div class="info-card">
+                <div class="info-row">
+                    <span class="info-label" data-i18n="welcome.connStatus">连接状态</span>
+                    <span class="info-value success" data-i18n="welcome.connected">已连接</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label" data-i18n="welcome.username">用户名</span>
+                    <span class="info-value highlight">{{ bound_username or cert_name }}</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label" data-i18n="welcome.publicIp">公网 IP</span>
+                    <span class="info-value">{{ client_ip }}</span>
+                </div>
+            </div>
+            
+            {% else %}
+            <!-- Not Connected State -->
+            <div class="status-icon offline">
+                <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+                </svg>
+            </div>
+            
+            <h1 class="welcome-title" data-i18n="welcome.brandTitle">VPN Manager</h1>
+            
+            <div class="info-card">
+                <div class="info-row">
+                    <span class="info-label" data-i18n="welcome.connStatus">连接状态</span>
+                    <span class="info-value" style="color: var(--gray-500);" data-i18n="welcome.notConnected">未连接</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label" data-i18n="welcome.yourIp">您的 IP</span>
+                    <span class="info-value">{{ real_ip }}</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label" data-i18n="welcome.serviceStatus">服务状态</span>
+                    <span class="info-value {% if vpn_running %}success{% endif %}">
+                        {% if vpn_running %}<span data-i18n="welcome.running">运行中</span>{% else %}<span data-i18n="welcome.stopped">已停止</span>{% endif %}
+                    </span>
+                </div>
+            </div>
+            {% endif %}
+            
+            <div class="action-buttons">
+                <a href="/public-debug" class="btn btn-primary">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <rect x="2" y="2" width="20" height="8" rx="2" ry="2"/>
+                        <rect x="2" y="14" width="20" height="8" rx="2" ry="2"/>
+                        <line x1="6" y1="6" x2="6.01" y2="6"/>
+                        <line x1="6" y1="18" x2="6.01" y2="18"/>
+                    </svg>
+                    <span data-i18n="welcome.diagnostics">网络诊断</span>
+                </a>
+                <a href="/login" class="btn btn-secondary">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="12" cy="12" r="3"/>
+                        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+                    </svg>
+                    <span data-i18n="welcome.adminPanel">管理后台</span>
+                </a>
+            </div>
+            
+            <div class="welcome-footer">
+                Powered by Libreswan
+            </div>
+        </div>
+    </div>
+</body>
+</html>

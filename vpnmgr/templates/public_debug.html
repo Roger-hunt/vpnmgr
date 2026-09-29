@@ -1,0 +1,612 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>网络诊断 - VPN Manager</title>
+    <style>
+        :root {
+            --primary-50: #eff6ff;
+            --primary-500: #3b82f6;
+            --primary-600: #2563eb;
+            --gray-50: #f8fafc;
+            --gray-100: #f1f5f9;
+            --gray-200: #e2e8f0;
+            --gray-400: #94a3b8;
+            --gray-500: #64748b;
+            --gray-600: #475569;
+            --gray-800: #1e293b;
+            --success: #10b981;
+            --success-light: #d1fae5;
+            --danger: #ef4444;
+            --danger-light: #fee2e2;
+            --warning: #f59e0b;
+            --warning-light: #fef3c7;
+            --radius: 10px;
+            --radius-lg: 16px;
+            --shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1);
+            --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        html {
+            font-size: 16px;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            min-height: 100vh;
+            background: var(--gray-100);
+            padding: 20px;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 24px;
+            padding-top: 20px;
+        }
+
+        .logo {
+            width: 56px;
+            height: 56px;
+            background: linear-gradient(135deg, var(--primary-500), var(--primary-600));
+            border-radius: var(--radius);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 auto 16px;
+            box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
+        }
+
+        .logo svg {
+            width: 28px;
+            height: 28px;
+            color: white;
+        }
+
+        .title {
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: var(--gray-800);
+            margin-bottom: 4px;
+        }
+
+        .subtitle {
+            font-size: 0.9375rem;
+            color: var(--gray-500);
+        }
+
+        .card {
+            background: white;
+            border-radius: var(--radius-lg);
+            border: 1px solid var(--gray-200);
+            box-shadow: var(--shadow);
+            margin-bottom: 16px;
+            overflow: hidden;
+        }
+
+        .card-header {
+            padding: 16px 20px;
+            border-bottom: 1px solid var(--gray-200);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .card-title {
+            font-size: 1rem;
+            font-weight: 600;
+            color: var(--gray-800);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .card-body {
+            padding: 20px;
+        }
+
+        .status-item {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            padding: 16px 0;
+            border-bottom: 1px solid var(--gray-200);
+        }
+
+        .status-item:last-child {
+            border-bottom: none;
+            padding-bottom: 0;
+        }
+
+        .status-item:first-child {
+            padding-top: 0;
+        }
+
+        .status-icon {
+            width: 48px;
+            height: 48px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+        }
+
+        .status-icon.success {
+            background: var(--success-light);
+            color: var(--success);
+        }
+
+        .status-icon.error {
+            background: var(--danger-light);
+            color: var(--danger);
+        }
+
+        .status-icon.pending {
+            background: var(--warning-light);
+            color: var(--warning);
+        }
+
+        .status-info {
+            flex: 1;
+        }
+
+        .status-label {
+            font-size: 0.875rem;
+            color: var(--gray-500);
+            margin-bottom: 4px;
+        }
+
+        .status-value {
+            font-size: 1.125rem;
+            font-weight: 600;
+            color: var(--gray-800);
+        }
+
+        .status-value.success {
+            color: var(--success);
+        }
+
+        .status-value.error {
+            color: var(--danger);
+        }
+
+        .status-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 12px;
+            border-radius: 9999px;
+            font-size: 0.75rem;
+            font-weight: 600;
+        }
+
+        .status-badge.success {
+            background: var(--success-light);
+            color: var(--success);
+        }
+
+        .status-badge.error {
+            background: var(--danger-light);
+            color: var(--danger);
+        }
+
+        .status-badge.pending {
+            background: var(--warning-light);
+            color: var(--warning);
+        }
+
+        .note {
+            background: var(--primary-50);
+            border-left: 3px solid var(--primary-500);
+            padding: 12px 16px;
+            margin: 16px 20px;
+            border-radius: 0 var(--radius) var(--radius) 0;
+            font-size: 0.875rem;
+            color: var(--gray-600);
+        }
+
+        .refresh-btn {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            width: 100%;
+            padding: 14px;
+            background: var(--primary-500);
+            color: white;
+            border: none;
+            border-radius: var(--radius);
+            font-size: 0.9375rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            margin-top: 8px;
+        }
+
+        .refresh-btn:hover {
+            background: var(--primary-600);
+        }
+
+        .refresh-btn:disabled {
+            opacity: 0.7;
+            cursor: not-allowed;
+        }
+
+        .refresh-btn.spinning svg {
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            from {
+                transform: rotate(0deg);
+            }
+
+            to {
+                transform: rotate(360deg);
+            }
+        }
+
+        .footer {
+            text-align: center;
+            margin-top: 24px;
+            padding-top: 24px;
+            border-top: 1px solid var(--gray-200);
+        }
+
+        .back-link {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            color: var(--gray-500);
+            text-decoration: none;
+            font-size: 0.875rem;
+            font-weight: 500;
+        }
+
+        .back-link:hover {
+            color: var(--primary-600);
+        }
+
+        .last-updated {
+            text-align: center;
+            font-size: 0.75rem;
+            color: var(--gray-400);
+            margin-top: 12px;
+        }
+
+        @media (max-width: 480px) {
+            html {
+                font-size: 15px;
+            }
+
+            body {
+                padding: 16px;
+            }
+
+            .header {
+                padding-top: 10px;
+            }
+
+            .logo {
+                width: 48px;
+                height: 48px;
+            }
+
+            .logo svg {
+                width: 24px;
+                height: 24px;
+            }
+
+            .status-icon {
+                width: 40px;
+                height: 40px;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="logo">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+                </svg>
+            </div>
+            <h1 class="title">网络诊断</h1>
+            <p class="subtitle">从您的设备检测网络连接状态</p>
+        </div>
+
+        <div class="card">
+            <div class="card-header">
+                <h2 class="card-title">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                        style="color: var(--primary-500);">
+                        <rect x="2" y="2" width="20" height="8" rx="2" ry="2" />
+                        <rect x="2" y="14" width="20" height="8" rx="2" ry="2" />
+                        <line x1="6" y1="6" x2="6.01" y2="6" />
+                        <line x1="6" y1="18" x2="6.01" y2="18" />
+                    </svg>
+                    连接状态
+                </h2>
+                <span class="status-badge pending" id="overall-badge">检测中...</span>
+            </div>
+            <div class="note">
+                <strong>提示：</strong>以下检测结果反映您当前设备的网络访问能力
+            </div>
+            <div class="card-body">
+                <div class="status-item">
+                    <div class="status-icon pending" id="internet-icon">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2">
+                            <circle cx="12" cy="12" r="10" />
+                            <line x1="2" y1="12" x2="22" y2="12" />
+                            <path
+                                d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+                        </svg>
+                    </div>
+                    <div class="status-info">
+                        <div class="status-label">互联网连接</div>
+                        <div class="status-value" id="internet-status">检测中...</div>
+                    </div>
+                </div>
+
+                <div class="status-item">
+                    <div class="status-icon pending" id="lan-icon">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2">
+                            <rect x="2" y="2" width="20" height="8" rx="2" ry="2" />
+                            <rect x="2" y="14" width="20" height="8" rx="2" ry="2" />
+                            <line x1="6" y1="6" x2="6.01" y2="6" />
+                            <line x1="6" y1="18" x2="6.01" y2="18" />
+                        </svg>
+                    </div>
+                    <div class="status-info">
+                        <div class="status-label">内网服务器</div>
+                        <div class="status-value" id="lan-status">检测中...</div>
+                    </div>
+                </div>
+
+                <div class="status-item">
+                    <div class="status-icon pending" id="vpnserver-icon">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2">
+                            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+                        </svg>
+                    </div>
+                    <div class="status-info">
+                        <div class="status-label">VPN 服务器</div>
+                        <div class="status-value" id="vpnserver-status">检测中...</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <button class="refresh-btn" id="refresh-btn" onclick="checkAll()">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="23 4 23 10 17 10" />
+                <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
+            </svg>
+            重新检测
+        </button>
+
+        <div class="last-updated" id="last-updated"></div>
+
+        <div class="footer">
+            <a href="/" class="back-link">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <line x1="19" y1="12" x2="5" y2="12" />
+                    <polyline points="12 19 5 12 12 5" />
+                </svg>
+                返回欢迎页面
+            </a>
+        </div>
+    </div>
+
+    <script>
+        // 保存服务器端检测到的状态，作为浏览器端检测的备份与补充
+        let serverNetworkStatus = null;
+
+        // 检测 VPN 服务器（从浏览器端）并拉取服务器端网络诊断结果
+        async function checkVPNServer() {
+            setPending('vpnserver');
+
+            try {
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 5000);
+
+                // 尝试访问当前页面的服务器 (使用 GET 避免 HEAD 请求可能带来的 405 Method Not Allowed)
+                const response = await fetch('/api/public-debug?t=' + Date.now(), {
+                    method: 'GET',
+                    signal: controller.signal
+                });
+
+                clearTimeout(timeoutId);
+
+                if (response.ok) {
+                    serverNetworkStatus = await response.json();
+                    setSuccess('vpnserver', '正常');
+                    return true;
+                } else {
+                    setError('vpnserver', `异常 (状态码: ${response.status})`);
+                    return false;
+                }
+            } catch (e) {
+                setError('vpnserver', '无法连接');
+                return false;
+            }
+        }
+
+        // 检测互联网连接（从浏览器端）
+        async function checkInternet() {
+            setPending('internet');
+
+            // 方法1: navigator.onLine
+            if (!navigator.onLine) {
+                // 如果浏览器说离线，但服务器网络状态说在线，我们也可以信任服务器作为补充
+                if (serverNetworkStatus && serverNetworkStatus.internet_connected) {
+                    setSuccess('internet', '已连接 (服务器确认)');
+                    return true;
+                }
+                setError('internet', '离线');
+                return false;
+            }
+
+            // 方法2: 尝试加载外部资源（带时间戳避免缓存）
+            const tests = [
+                'https://www.baidu.com/favicon.ico',
+                'https://223.5.5.5/favicon.ico',
+                'https://1.1.1.1/favicon.ico'
+            ];
+
+            for (const url of tests) {
+                try {
+                    const controller = new AbortController();
+                    const timeoutId = setTimeout(() => controller.abort(), 5000);
+
+                    await fetch(url + '?t=' + Date.now(), {
+                        method: 'GET',
+                        mode: 'no-cors',
+                        signal: controller.signal
+                    });
+
+                    clearTimeout(timeoutId);
+                    setSuccess('internet', '已连接');
+                    return true;
+                } catch (e) {
+                    continue;
+                }
+            }
+
+            // 备份：检查服务器端检测结果
+            if (serverNetworkStatus && serverNetworkStatus.internet_connected) {
+                setSuccess('internet', '已连接 (服务器确认)');
+                return true;
+            }
+
+            // 所有测试都失败
+            setError('internet', '未连接');
+            return false;
+        }
+
+        // 检测内网服务器（从浏览器端）
+        async function checkLAN() {
+            setPending('lan');
+
+            // 动态使用服务端返回的内网探测目标，若未配置则跳过
+            const lanIp = serverNetworkStatus && serverNetworkStatus.lan_ip ? serverNetworkStatus.lan_ip : '';
+            if (!lanIp) {
+                setSuccess('lan', '未配置内网探测目标 (可于环境变量配置)');
+                return true;
+            }
+
+            const ports = [8354, 80, 443];
+
+            // 1. 尝试从浏览器直接发送请求
+            for (const port of ports) {
+                try {
+                    const controller = new AbortController();
+                    const timeoutId = setTimeout(() => controller.abort(), 3000);
+
+                    await fetch(`http://${lanIp}:${port}`, {
+                        method: 'GET',
+                        mode: 'no-cors',
+                        signal: controller.signal
+                    });
+
+                    clearTimeout(timeoutId);
+                    setSuccess('lan', `可访问 (${lanIp})`);
+                    return true;
+                } catch (e) {
+                    // 继续尝试下一个端口
+                    continue;
+                }
+            }
+
+            // 2. 如果浏览器直接连接失败（可能由于混合内容、CORS 或非 HTTP 服务等限制），
+            // 则使用服务器端的 Socket 校验结果作为备份
+            if (serverNetworkStatus && serverNetworkStatus.lan_accessible) {
+                setSuccess('lan', `可访问 (服务器确认: ${lanIp})`);
+                return true;
+            }
+
+            setError('lan', `不可访问 (${lanIp})`);
+            return false;
+        }
+
+        // 主检测函数
+        async function checkAll() {
+            const btn = document.getElementById('refresh-btn');
+            btn.disabled = true;
+            btn.classList.add('spinning');
+
+            // 重置状态
+            document.getElementById('overall-badge').className = 'status-badge pending';
+            document.getElementById('overall-badge').textContent = '检测中...';
+
+            // 1. 先检测 VPN 服务器，以获取服务器端其他的网络检测数据
+            const vpnserver = await checkVPNServer();
+
+            // 2. 并行执行浏览器端的互联网 and 内网服务器检测（它们可以利用第一步拉取的服务器诊断结果作为备份）
+            const [internet, lan] = await Promise.all([
+                checkInternet(),
+                checkLAN()
+            ]);
+
+            // 更新总体状态 (互联网连接、内网服务器、VPN服务器均正常时为整体正常)
+            const allOk = internet && vpnserver && lan;
+            const overallBadge = document.getElementById('overall-badge');
+            if (allOk) {
+                overallBadge.className = 'status-badge success';
+                overallBadge.textContent = '正常';
+            } else {
+                overallBadge.className = 'status-badge error';
+                overallBadge.textContent = '异常';
+            }
+
+            // 更新时间戳
+            document.getElementById('last-updated').textContent =
+                '最后更新: ' + new Date().toLocaleString('zh-CN');
+
+            btn.disabled = false;
+            btn.classList.remove('spinning');
+        }
+
+        function setPending(type) {
+            document.getElementById(type + '-icon').className = 'status-icon pending';
+            document.getElementById(type + '-status').className = 'status-value';
+            document.getElementById(type + '-status').textContent = '检测中...';
+        }
+
+        function setSuccess(type, message) {
+            document.getElementById(type + '-icon').className = 'status-icon success';
+            document.getElementById(type + '-status').className = 'status-value success';
+            document.getElementById(type + '-status').textContent = message;
+        }
+
+        function setError(type, message) {
+            document.getElementById(type + '-icon').className = 'status-icon error';
+            document.getElementById(type + '-status').className = 'status-value error';
+            document.getElementById(type + '-status').textContent = message;
+        }
+
+        // 页面加载时自动检测
+        checkAll();
+    </script>
+</body>
+
+</html>

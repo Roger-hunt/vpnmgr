@@ -1,0 +1,26 @@
+version: '3.8'
+
+services:
+  vpnmgr:
+    build: .
+    container_name: vpn-manager
+    restart: always
+    ports:
+      - "8080:8080"
+    environment:
+      - ADMIN_USERNAME=admin
+      - ADMIN_PASSWORD=admin123
+      - SECRET_KEY=change-me-in-production
+      - VPN_CONTAINER_NAME=ipsec-vpn-server
+      - DATABASE_URL=sqlite+aiosqlite:///./data/vpnmgr.db
+      - DEBUG=false
+    volumes:
+      - ./data:/app/data
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - vpn-network
+
+networks:
+  vpn-network:
+    external: true
+    name: ipsec-vpn-network

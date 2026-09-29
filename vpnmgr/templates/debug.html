@@ -1,0 +1,320 @@
+{% extends "base.html" %}
+
+{% block title %}调试信息 - VPN Manager{% endblock %}
+{% block page_title %}<span data-i18n="debug.title">调试信息</span>{% endblock %}
+
+{% block content %}
+<div class="debug-container">
+    <!-- 网络信息卡片 -->
+    <div class="card">
+        <div class="card-header">
+            <i class="fas fa-network-wired"></i>
+            <h3 data-i18n="debug.networkInfo">本机网络信息</h3>
+        </div>
+        <div class="card-body">
+            <div class="info-grid" id="network-info">
+                <div class="info-item">
+                    <span class="info-label" data-i18n="debug.realIp">您的实际 IP</span>
+                    <span class="info-value" id="real-ip">
+                        <i class="fas fa-spinner fa-spin"></i> <span data-i18n="debug.detecting">检测中...</span>
+                    </span>
+                    <span class="info-desc" data-i18n="debug.realIpDesc">您访问此页面使用的 IP</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label" data-i18n="debug.serverIp">服务器看到的 IP</span>
+                    <span class="info-value" id="direct-ip">
+                        <i class="fas fa-spinner fa-spin"></i> <span data-i18n="debug.detecting">检测中...</span>
+                    </span>
+                    <span class="info-desc" data-i18n="debug.serverIpDesc">Web 服务器直接看到的客户端 IP</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label" data-i18n="debug.activeCount">活跃连接数</span>
+                    <span class="info-value" id="active-count-display">
+                        <i class="fas fa-spinner fa-spin"></i> <span data-i18n="debug.detecting">检测中...</span>
+                    </span>
+                    <span class="info-desc" data-i18n="debug.activeCountDesc">服务器当前 VPN 连接数</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label" data-i18n="debug.ipVerified">IP 验证状态</span>
+                    <span class="info-value" id="ip-verified">
+                        <i class="fas fa-spinner fa-spin"></i> <span data-i18n="debug.detecting">检测中...</span>
+                    </span>
+                    <span class="info-desc" data-i18n="debug.ipVerifiedDesc">验证 IP 是否来自合法的 VPN 连接</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 活动连接列表 -->
+    <div class="card">
+        <div class="card-header">
+            <i class="fas fa-users"></i>
+            <h3 data-i18n="debug.activeConnsTitle">当前活跃的 VPN 连接</h3>
+            <span class="badge badge-primary" id="active-count">0</span>
+        </div>
+        <div class="card-body">
+            <div id="connections-table-container">
+                <table class="data-table" id="connections-table">
+                    <thead>
+                        <tr>
+                            <th data-i18n="debug.colClient">证书名/用户名</th>
+                            <th data-i18n="debug.colPublicIp">公网 IP</th>
+                            <th data-i18n="debug.colInternalIp">分配的内网 IP</th>
+                            <th data-i18n="logs.tableType">隧道类型</th>
+                            <th data-i18n="common.status">状态</th>
+                        </tr>
+                    </thead>
+                    <tbody id="connections-tbody">
+                        <tr>
+                            <td colspan="5" class="text-center text-muted">
+                                <i class="fas fa-spinner fa-spin"></i> <span data-i18n="common.loading">加载中...</span>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+            <div id="no-connections" class="empty-state" style="display: none;">
+                <i class="fas fa-plug"></i>
+                <p data-i18n="debug.noConns">当前没有活跃的 VPN 连接</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- 连接详情卡片 -->
+    <div class="card">
+        <div class="card-header">
+            <i class="fas fa-info-circle"></i>
+            <h3 data-i18n="debug.reqDetails">请求详情</h3>
+        </div>
+        <div class="card-body">
+            <div class="info-list" id="connection-details">
+                <div class="info-row">
+                    <span class="info-label">User-Agent:</span>
+                    <span class="info-value mono" id="user-agent">-</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label" data-i18n="debug.detectTime">检测时间:</span>
+                    <span class="info-value" id="check-time">-</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 操作按钮 -->
+    <div class="card">
+        <div class="card-header">
+            <i class="fas fa-tools"></i>
+            <h3 data-i18n="common.actions">操作</h3>
+        </div>
+        <div class="card-body">
+            <button class="btn btn-primary" onclick="refreshDebugInfo()">
+                <i class="fas fa-sync-alt"></i> <span data-i18n="debug.refreshInfo">刷新信息</span>
+            </button>
+            <button class="btn btn-secondary" onclick="copyDebugInfo()">
+                <i class="fas fa-copy"></i> <span data-i18n="debug.copyInfo">复制信息</span>
+            </button>
+        </div>
+    </div>
+
+    <!-- 说明卡片 -->
+    <div class="card card-info">
+        <div class="card-header">
+            <i class="fas fa-question-circle"></i>
+            <h3 data-i18n="debug.instructions">说明</h3>
+        </div>
+        <div class="card-body">
+            <ul>
+                <li data-i18n-html="debug.note1"><strong>本机网络信息</strong>显示您当前访问此页面的 IP 和活跃连接数</li>
+                <li data-i18n-html="debug.note2"><strong>IP 验证状态</strong>：绿色已验证表示来自合法 VPN 连接；红色未验证提示可能存在安全风险</li>
+                <li data-i18n-html="debug.note3"><strong>活跃的 VPN 连接</strong>列表显示服务器上所有当前的 VPN 连接</li>
+                <li data-i18n-html="debug.note4">请在<strong>证书名</strong>列中找到您使用的证书名，对应的就是您的连接</li>
+                <li data-i18n-html="debug.note5"><strong>分配的内网 IP</strong>是 VPN 连接成功后分配给您的地址（如 192.168.43.x）</li>
+                <li data-i18n-html="debug.note6">如果列表为空，说明当前没有用户连接到 VPN</li>
+            </ul>
+        </div>
+    </div>
+
+    <!-- 安全说明卡片 -->
+    <div class="card card-info">
+        <div class="card-header">
+            <i class="fas fa-shield-alt"></i>
+            <h3 data-i18n="debug.securityMechanism">安全机制</h3>
+        </div>
+        <div class="card-body">
+            <ul>
+                <li data-i18n-html="debug.sec1"><strong>IPsec/IKEv2 协议</strong>：确保 IP 地址由服务器强制分配，客户端无法自行声明</li>
+                <li data-i18n-html="debug.sec2"><strong>内核级验证</strong>：IPsec SA（安全关联）确保只有匹配的数据包能通过隧道</li>
+                <li data-i18n-html="debug.sec3"><strong>应用层验证</strong>：每次请求都验证 IP 是否在当前活跃 VPN 连接列表中</li>
+                <li data-i18n-html="debug.sec4"><strong>地址池隔离</strong>：VPN 客户端只能从 192.168.43.0/24 子网获取 IP，无法占用其他地址</li>
+                <li data-i18n-html="debug.sec5"><strong>单设备限制</strong>：每个证书只能同时在线一个设备（新连接会踢掉旧连接）</li>
+            </ul>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+let currentData = null;
+
+document.addEventListener('DOMContentLoaded', function() {
+    refreshDebugInfo();
+    // 每5秒刷新一次
+    setInterval(refreshDebugInfo, 5000);
+});
+
+async function refreshDebugInfo() {
+    try {
+        const response = await fetch('/api/debug/network-info');
+        const data = await response.json();
+        
+        if (data.success) {
+            currentData = data.data;
+            updateNetworkInfo(data.data);
+            updateConnectionsTable(data.data.active_connections || []);
+        } else {
+            showToast(t('common.failed'), 'error');
+        }
+    } catch (error) {
+        console.error('Error fetching debug info:', error);
+    }
+}
+
+function updateNetworkInfo(data) {
+    // 实际 IP
+    const realIpEl = document.getElementById('real-ip');
+    realIpEl.innerHTML = `<i class="fas fa-globe"></i> ${data.real_ip || '-'}`;
+    
+    // 服务器直接看到的 IP
+    const directIpEl = document.getElementById('direct-ip');
+    directIpEl.innerHTML = `<i class="fas fa-ethernet"></i> ${data.direct_ip || '-'}`;
+    
+    // 活跃连接数
+    const countEl = document.getElementById('active-count-display');
+    const count = (data.active_connections || []).length;
+    countEl.innerHTML = `<span class="badge badge-primary">${count}</span>`;
+    
+    // IP 验证状态
+    const verifiedEl = document.getElementById('ip-verified');
+    if (data.is_vpn_ip && data.ip_verified) {
+        const conn = data.matched_connection;
+        verifiedEl.innerHTML = `<span class="badge badge-success"><i class="fas fa-shield-alt"></i> ${t('debug.verified')}</span>`;
+        verifiedEl.title = `${t('certs.clientName')}: ${conn?.username || '-'}\n${t('debug.colPublicIp')}: ${conn?.client_ip || '-'}`;
+    } else if (data.is_vpn_ip && !data.ip_verified) {
+        verifiedEl.innerHTML = `<span class="badge badge-danger"><i class="fas fa-exclamation-triangle"></i> ${t('debug.unverified')}</span>`;
+        verifiedEl.title = t('debug.note2');
+    } else {
+        verifiedEl.innerHTML = `<span class="badge badge-secondary">${t('debug.nonVpn')}</span>`;
+        verifiedEl.title = '';
+    }
+    
+    // User Agent
+    document.getElementById('user-agent').textContent = data.user_agent || navigator.userAgent;
+    
+    // 检测时间
+    const lang = (window.i18n && i18n.getLanguage() === 'en') ? 'en-US' : 'zh-CN';
+    document.getElementById('check-time').textContent = new Date().toLocaleString(lang, {
+        hour12: false
+    });
+}
+
+function updateConnectionsTable(connections) {
+    const tbody = document.getElementById('connections-tbody');
+    const tableContainer = document.getElementById('connections-table-container');
+    const noConnections = document.getElementById('no-connections');
+    const countBadge = document.getElementById('active-count');
+    
+    // 更新计数
+    countBadge.textContent = connections.length;
+    
+    if (connections.length === 0) {
+        tableContainer.style.display = 'none';
+        noConnections.style.display = 'block';
+        return;
+    }
+    
+    tableContainer.style.display = 'block';
+    noConnections.style.display = 'none';
+    
+    tbody.innerHTML = connections.map(conn => {
+        return `
+            <tr>
+                <td><strong>${escapeHtml(conn.username || '-')}</strong></td>
+                <td><code>${escapeHtml(conn.client_ip || '-')}</code></td>
+                <td><code class="text-success">${escapeHtml(conn.assigned_ip || '-')}</code></td>
+                <td>${escapeHtml(conn.tunnel || '-')}</td>
+                <td><span class="badge badge-success">${t('debug.connecting')}</span></td>
+            </tr>
+        `;
+    }).join('');
+}
+
+function escapeHtml(text) {
+    if (!text) return '';
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+function copyDebugInfo() {
+    if (!currentData) {
+        showToast(t('debug.waitLoad'), 'error');
+        return;
+    }
+    
+    const connections = currentData.active_connections || [];
+    let connInfo = '';
+    if (connections.length > 0) {
+        connInfo = `\n\n${t('debug.activeConnsTitle')}:\n` + connections.map((conn, i) => 
+            `${i + 1}. ${conn.username} - ${t('debug.colPublicIp')}: ${conn.client_ip}, ${t('debug.colInternalIp')}: ${conn.assigned_ip}`
+        ).join('\n');
+    } else {
+        connInfo = `\n\n${t('debug.noConns')}`;
+    }
+    
+    const lang = (window.i18n && i18n.getLanguage() === 'en') ? 'en-US' : 'zh-CN';
+    const info = `${t('debug.title')}
+================
+${t('debug.realIp')}: ${currentData.real_ip || '-'}
+${t('debug.serverIp')}: ${currentData.direct_ip || '-'}
+${t('debug.activeCount')}: ${connections.length}${connInfo}
+
+${t('debug.detectTime')} ${new Date().toLocaleString(lang)}`;
+    
+    navigator.clipboard.writeText(info).then(() => {
+        showToast(t('debug.copySuccess'), 'success');
+    }).catch(() => {
+        showToast(t('debug.copyFail'), 'error');
+    });
+}
+
+// React to language switch
+if (window.i18n) {
+    i18n.onChange(() => {
+        if (currentData) {
+            updateNetworkInfo(currentData);
+            updateConnectionsTable(currentData.active_connections || []);
+        }
+    });
+}
+</script>
+
+<style>
+#active-count {
+    margin-left: 8px;
+    font-size: 0.85em;
+}
+
+.empty-state {
+    text-align: center;
+    padding: 40px 20px;
+    color: #888;
+}
+
+.empty-state i {
+    font-size: 48px;
+    margin-bottom: 16px;
+    display: block;
+}
+</style>
+{% endblock %}
