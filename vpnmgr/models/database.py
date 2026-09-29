@@ -84,3 +84,28 @@ async def init_db():
                         logger.warning("Could not add oidc_sub column: %s", e)
         
         await conn.run_sync(migrate_system_users)
+
+        # Check and add is_protected column to ikev2_certificates if missing
+        def migrate_ikev2_certificates(connection):
+            from sqlalchemy import inspect, text
+            inspector = inspect(connection)
+            if "ikev2_certificates" in inspector.get_table_names():
+                cols = [col["name"] for col in inspector.get_columns("ikev2_certificates")]
+                if "is_protected" not in cols:
+                    try:
+                        connection.execute(text(
+                            "ALTER TABLE ikev2_certificates ADD COLUMN is_protected BOOLEAN DEFAULT 0"
+                        ))
+                        logger.info("Migrated ikev2_certificates: added is_protected column")
+                    except Exception as e:
+                        logger.warning("Could not add is_protected column: %s", e)
+                if "config_password" not in cols:
+                    try:
+                        connection.execute(text(
+                            "ALTER TABLE ikev2_certificates ADD COLUMN config_password VARCHAR(255)"
+                        ))
+                        logger.info("Migrated ikev2_certificates: added config_password column")
+                    except Exception as e:
+                        logger.warning("Could not add config_password column: %s", e)
+
+        await conn.run_sync(migrate_ikev2_certificates)

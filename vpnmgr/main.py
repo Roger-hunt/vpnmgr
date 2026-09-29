@@ -1046,17 +1046,35 @@ async def api_list_certs(
     print(f"[DEBUG] DB certs: {len(db_certs)}")
     
     # Merge container certs with db info
+    now = datetime.now(timezone.utc)
     certs = []
     for idx, cert in enumerate(container_certs, 1):
         client_name = cert["name"]
         db_cert = db_certs.get(client_name)
-        
+
+        # Prefer the validity read live from the container, fall back to the DB
+        expires_iso = cert.get("expires_at")
+        if not expires_iso and db_cert and db_cert.expires_at:
+            expires_iso = db_cert.expires_at.replace(tzinfo=timezone.utc).isoformat()
+
+        days_remaining = None
+        if expires_iso:
+            try:
+                exp = datetime.fromisoformat(expires_iso)
+                if exp.tzinfo is None:
+                    exp = exp.replace(tzinfo=timezone.utc)
+                days_remaining = (exp - now).days
+            except ValueError:
+                pass
+
         certs.append({
             "id": db_cert.id if db_cert else idx,
             "client_name": client_name,
             "status": cert.get("status", "valid"),
             "created_at": db_cert.created_at.isoformat() if db_cert and db_cert.created_at else None,
-            "expires_at": db_cert.expires_at.isoformat() if db_cert and db_cert.expires_at else None,
+            "expires_at": expires_iso,
+            "days_remaining": days_remaining,
+            "is_protected": bool(db_cert.is_protected) if db_cert else False,
             "is_active": cert.get("status") == "valid",
             "description": db_cert.description if db_cert else None,
             "p12_path": cert.get("p12_path"),
@@ -1085,19 +1103,35 @@ async def api_create_cert(
             detail="Certificate with this name already exists"
         )
     
-    # Generate cert
-    success, message, p12_data = vpn_manager.generate_ikev2_cert(data.client_name)
+    # Generate cert (optionally protected with an import password)
+    success, message, p12_data, import_password = vpn_manager.generate_ikev2_cert(
+        data.client_name,
+        protect_config=data.protect_config,
+        config_password=data.config_password
+    )
     if not success:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=message
         )
-    
+
+    # Read the certificate validity back so the list can show remaining days
+    expires_at = None
+    try:
+        expires_iso = vpn_manager.get_cert_expiry(data.client_name)
+        if expires_iso:
+            expires_at = datetime.fromisoformat(expires_iso).replace(tzinfo=None)
+    except Exception as e:
+        print(f"[CERT] Could not read expiry for {data.client_name}: {e}")
+
     # Save to database
     db_cert = IKEv2Certificate(
         client_name=data.client_name,
         p12_path=f"/etc/ipsec.d/{data.client_name}.p12",
-        description=data.description
+        description=data.description,
+        is_protected=bool(import_password),
+        config_password=import_password,
+        expires_at=expires_at
     )
     db.add(db_cert)
     await db.commit()
@@ -1107,7 +1141,8 @@ async def api_create_cert(
         "success": True,
         "message": message,
         "cert": db_cert.to_dict(),
-        "p12_data": p12_data
+        "p12_data": p12_data,
+        "import_password": import_password
     }
 
 
@@ -1150,10 +1185,21 @@ async def api_delete_cert(
 async def api_download_cert(
     client_name: str,
     format: str = "p12",
-    user: str = Depends(require_auth)
+    user: str = Depends(require_auth),
+    db: AsyncSession = Depends(get_db)
 ):
     """Download IKEv2 certificate in specified format"""
-    success, message, file_data, filename = vpn_manager.export_ikev2_cert(client_name, format)
+    # Honour the per-certificate import password setting
+    result = await db.execute(
+        select(IKEv2Certificate).where(IKEv2Certificate.client_name == client_name)
+    )
+    db_cert = result.scalar_one_or_none()
+    protect = bool(db_cert.is_protected) if db_cert else False
+
+    success, message, file_data, filename = vpn_manager.export_ikev2_cert(
+        client_name, format, protect=protect,
+        config_password=db_cert.config_password if db_cert else None
+    )
     
     if not success:
         raise HTTPException(
@@ -1172,7 +1218,9 @@ async def api_download_cert(
         "success": True,
         "filename": filename,
         "content_type": mime_types.get(format, "application/octet-stream"),
-        "data": file_data
+        "data": file_data,
+        "is_protected": protect,
+        "import_password": (db_cert.config_password or vpn_manager.get_config_password()) if protect else None
     }
 
 

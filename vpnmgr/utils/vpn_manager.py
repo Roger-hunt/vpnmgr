@@ -1,13 +1,39 @@
 """
 VPN Manager - Docker container interaction
 """
+import base64
 import docker
 import subprocess
 import re
+from datetime import datetime, timezone
 from typing import List, Dict, Optional, Tuple
 from ..config import get_settings
 
 settings = get_settings()
+
+
+def parse_cert_expiry(text: str) -> Optional[str]:
+    """
+    Parse a certificate 'Not After' line into an ISO timestamp.
+
+    Handles both formats:
+      openssl : notAfter=Jan  1 00:00:00 2028 GMT
+      certutil: Not After : Jan  1 00:00:00 2028 GMT
+    """
+    if not text:
+        return None
+    match = re.search(
+        r"not ?after\s*[=:]\s*([A-Za-z]{3}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2}\s+\d{4})",
+        text, re.IGNORECASE
+    )
+    if not match:
+        return None
+    normalized = " ".join(match.group(1).split())
+    try:
+        dt = datetime.strptime(normalized, "%b %d %H:%M:%S %Y")
+    except ValueError:
+        return None
+    return dt.replace(tzinfo=timezone.utc).isoformat()
 
 
 class VPNManager:
@@ -496,32 +522,162 @@ class VPNManager:
                             "sswan_path": f"/etc/ipsec.d/{cert_name}.sswan",
                         })
         
+        # Attach certificate validity so the UI can show the remaining days
+        expiries = self._collect_cert_expiry([c["name"] for c in certs])
+        for cert in certs:
+            cert["expires_at"] = expiries.get(cert["name"])
+
         return certs
-    
-    def generate_ikev2_cert(self, client_name: str) -> Tuple[bool, str, Optional[str]]:
-        """
-        Generate IKEv2 certificate for client
-        Returns: (success, message, p12_content_base64)
-        """
-        # Run ikev2.sh to add client
-        exit_code, stdout, stderr = self.exec_command([
+
+    def get_cert_expiry(self, client_name: str) -> Optional[str]:
+        """Return the ISO expiry timestamp for a single certificate."""
+        return self._collect_cert_expiry([client_name]).get(client_name)
+
+    def _collect_cert_expiry(self, names: List[str]) -> Dict[str, Optional[str]]:
+        """Return {cert_name: iso_expiry} for the given certificates (single exec)."""
+        safe = [n for n in names if n and re.fullmatch(r"[A-Za-z0-9._@-]+", n)]
+        if not safe:
+            return {}
+        quoted = " ".join(f"'{n}'" for n in safe)
+        script = (
+            f"for n in {quoted}; do "
+            'echo "===CERT:$n==="; '
+            'certutil -L -d sql:/etc/ipsec.d -n "$n" 2>/dev/null | grep -i "not after" '
+            '|| certutil -L -d /etc/ipsec.d -n "$n" 2>/dev/null | grep -i "not after" '
+            '|| echo "EXPIRY_UNKNOWN"; '
+            "done"
+        )
+        code, out, _ = self.exec_command(["bash", "-c", script])
+        if code != 0 or not out:
+            return {}
+
+        result: Dict[str, Optional[str]] = {}
+        current = None
+        for line in out.splitlines():
+            line = line.strip()
+            if line.startswith("===CERT:") and line.endswith("==="):
+                current = line[len("===CERT:"):-3]
+                result.setdefault(current, None)
+            elif current and line and line != "EXPIRY_UNKNOWN":
+                parsed = parse_cert_expiry(line)
+                if parsed:
+                    result[current] = parsed
+        return result
+
+    # The import password is stored globally by ikev2.sh in this file, so any
+    # per-certificate decision has to be applied by (temporarily) rewriting it.
+    CONFIG_FILE = "/etc/ipsec.d/.vpnconfig"
+    PASSWORD_RE = re.compile(r"^[A-Za-z0-9._@#%^*+=\-]{6,128}$")
+
+    def validate_config_password(self, password: str) -> Tuple[bool, str]:
+        """Reject passwords that would break shell quoting inside the container."""
+        if not password:
+            return True, ""
+        if not self.PASSWORD_RE.match(password):
+            return False, "密码只能包含字母、数字以及 . _ @ # % ^ * + = - ，长度 6-128 位"
+        return True, ""
+
+    def get_config_password(self) -> str:
+        """Read the persisted client-config import password from the container."""
+        code, out, _ = self.exec_command([
             "bash", "-c",
-            f"echo '' | /opt/src/ikev2.sh --addclient '{client_name}'"
+            f"grep -s '^IKEV2_CONFIG_PASSWORD=.' {self.CONFIG_FILE} 2>/dev/null | tail -n 1 || true"
         ])
-        
+        if code != 0 or not out.strip():
+            return ""
+        return out.strip().split("=", 1)[-1].strip().strip("'")
+
+    def _write_config_password(self, password: str) -> bool:
+        """Set (or clear, when empty) IKEV2_CONFIG_PASSWORD in the config file."""
+        code, out, _ = self.exec_command([
+            "bash", "-c", f"cat {self.CONFIG_FILE} 2>/dev/null || true"
+        ])
+        content = out if code == 0 else ""
+        kept = [ln for ln in content.splitlines() if not ln.startswith("IKEV2_CONFIG_PASSWORD=")]
+        if password:
+            kept.append(f"IKEV2_CONFIG_PASSWORD='{password}'")
+        new_content = "\n".join(kept) + ("\n" if kept else "")
+        b64 = base64.b64encode(new_content.encode()).decode()
+        code, _, err = self.exec_command([
+            "bash", "-c",
+            f"printf '%s' '{b64}' | base64 -d > {self.CONFIG_FILE} && chmod 600 {self.CONFIG_FILE}"
+        ])
+        if code != 0:
+            print(f"[CERT] Failed to update {self.CONFIG_FILE}: {err}")
+        return code == 0
+
+    @staticmethod
+    def _parse_import_password(stdout: str) -> Optional[str]:
+        """Extract the password that ikev2.sh prints after protecting a config."""
+        lines = (stdout or "").splitlines()
+        for i, line in enumerate(lines):
+            if "Password for client config files" in line and i + 1 < len(lines):
+                candidate = lines[i + 1].strip()
+                if candidate:
+                    return candidate
+        return None
+
+    def generate_ikev2_cert(
+        self,
+        client_name: str,
+        protect_config: Optional[bool] = None,
+        config_password: Optional[str] = None
+    ) -> Tuple[bool, str, Optional[str], Optional[str]]:
+        """
+        Generate an IKEv2 certificate for a client.
+
+        protect_config / config_password default to the global settings.
+        Returns: (success, message, p12_content_base64, import_password)
+        """
+        if protect_config is None:
+            protect_config = settings.protect_client_config
+        if config_password is None:
+            config_password = settings.client_config_password or ""
+
+        ok, err = self.validate_config_password(config_password)
+        if not ok:
+            return False, err, None, None
+
+        # ikev2.sh keeps ONE import password for all clients. To issue an
+        # unprotected certificate we must hide any persisted password while the
+        # command runs, then put it back for the certificates that rely on it.
+        original_password = self.get_config_password()
+        restore_after = None
+        env_prefix = ""
+
+        if protect_config:
+            if config_password:
+                self._write_config_password(config_password)
+            env_prefix = "VPN_PROTECT_CONFIG=yes "
+        elif original_password:
+            self._write_config_password("")
+            restore_after = original_password
+
+        try:
+            exit_code, stdout, stderr = self.exec_command([
+                "bash", "-c",
+                f"{env_prefix}echo '' | /opt/src/ikev2.sh --addclient '{client_name}'"
+            ])
+        finally:
+            if restore_after is not None:
+                self._write_config_password(restore_after)
+
         if exit_code != 0:
-            return False, stderr or "Failed to generate certificate", None
-        
+            return False, stderr or "Failed to generate certificate", None, None
+
+        import_password = None
+        if protect_config:
+            import_password = self._parse_import_password(stdout) or self.get_config_password() or None
+
         # Export the .p12 file
         exit_code, stdout, stderr = self.exec_command([
             "bash", "-c",
             f"cat /etc/ipsec.d/{client_name}.p12 | base64"
         ])
-        
+
         if exit_code == 0:
-            return True, "Certificate generated successfully", stdout.strip()
-        else:
-            return True, "Certificate generated but failed to read file", None
+            return True, "Certificate generated successfully", stdout.strip(), import_password
+        return True, "Certificate generated but failed to read file", None, import_password
     
     def revoke_ikev2_cert(self, client_name: str) -> Tuple[bool, str]:
         """Revoke IKEv2 certificate"""
@@ -541,18 +697,47 @@ class VPNManager:
         else:
             return False, stderr or "Failed to revoke certificate"
     
-    def export_ikev2_cert(self, client_name: str, format_type: str = "p12") -> Tuple[bool, str, Optional[str], Optional[str]]:
+    def export_ikev2_cert(
+        self,
+        client_name: str,
+        format_type: str = "p12",
+        protect: Optional[bool] = None,
+        config_password: Optional[str] = None
+    ) -> Tuple[bool, str, Optional[str], Optional[str]]:
         """
         Export IKEv2 certificate in specified format
         format_type: 'p12', 'mobileconfig', or 'sswan'
+
+        ikev2.sh applies the import password at export time, so the per-certificate
+        protection flag has to be applied here as well.
         Returns: (success, message, file_content_base64, filename)
         """
-        # First, run exportclient to ensure files are generated
-        exit_code, stdout, stderr = self.exec_command([
-            "bash", "-c",
-            f"echo '' | /opt/src/ikev2.sh --exportclient '{client_name}'"
-        ])
-        
+        if protect is None:
+            protect = settings.protect_client_config
+
+        original_password = self.get_config_password()
+        restore_after = None
+        env_prefix = ""
+
+        if protect:
+            password = config_password or original_password or ""
+            if password and password != original_password:
+                self._write_config_password(password)
+                restore_after = original_password
+            env_prefix = "VPN_PROTECT_CONFIG=yes "
+        elif original_password:
+            self._write_config_password("")
+            restore_after = original_password
+
+        try:
+            exit_code, stdout, stderr = self.exec_command([
+                "bash", "-c",
+                f"{env_prefix}echo '' | /opt/src/ikev2.sh --exportclient '{client_name}'"
+            ])
+        finally:
+            if restore_after is not None:
+                self._write_config_password(restore_after)
+
         if exit_code != 0:
             return False, stderr or f"Failed to export certificate for '{client_name}'", None, None
         

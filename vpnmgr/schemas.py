@@ -49,6 +49,10 @@ class VPNUserResponse(BaseModel):
 class CertCreate(BaseModel):
     client_name: str = Field(..., min_length=1, max_length=100)
     description: Optional[str] = None
+    # Optional import password for the exported config files.
+    # protect_config=None falls back to the global setting.
+    protect_config: Optional[bool] = None
+    config_password: Optional[str] = Field(None, min_length=6, max_length=128)
 
 
 class CertResponse(BaseModel):

@@ -33,13 +33,14 @@
                     <th data-i18n="certs.clientName">客户端名称</th>
                     <th data-i18n="certs.boundUser">绑定用户</th>
                     <th data-i18n="certs.status">状态</th>
+                    <th data-i18n="certs.validity">有效期</th>
                     <th data-i18n="certs.createdAt">创建时间</th>
                     <th data-i18n="certs.actions">操作</th>
                 </tr>
             </thead>
             <tbody>
                 <tr class="loading-row">
-                    <td colspan="5">
+                    <td colspan="6">
                         <i class="fas fa-spinner fa-spin"></i>
                         <span data-i18n="common.loading">加载中...</span>
                     </td>
@@ -80,6 +81,20 @@
                     <label for="cert-description" data-i18n="common.description">描述</label>
                     <input type="text" id="cert-description" maxlength="200" 
                            data-i18n-placeholder="common.optional" placeholder="可选">
+                </div>
+
+                <div class="form-group">
+                    <label class="checkbox-label" for="cert-protect-config">
+                        <input type="checkbox" id="cert-protect-config">
+                        <span data-i18n="certs.protectConfig">使用导入密码保护配置文件</span>
+                    </label>
+                    <small data-i18n="certs.protectConfigHint">开启后导出的 .p12 / .mobileconfig / .sswan 需要密码才能导入，可避免配置文件泄露后被直接使用</small>
+                    <div id="cert-password-wrap" style="display:none;margin-top:8px">
+                        <input type="text" id="cert-config-password" maxlength="128" autocomplete="new-password"
+                               data-i18n-placeholder="certs.configPasswordPlaceholder"
+                               placeholder="留空则自动生成随机密码">
+                        <small data-i18n="certs.configPasswordHint">可用字符：字母、数字与 . _ @ # % ^ * + = - ，长度 6-128 位</small>
+                    </div>
                 </div>
             </div>
             <div class="modal-footer">
@@ -141,6 +156,17 @@
             <div class="cert-download-info">
                 <i class="fas fa-check-circle success-icon"></i>
                 <p data-i18n="certs.certGenSuccessTip">证书已成功生成！请下载并保存 .p12 文件。</p>
+
+                <div id="cert-password-result" class="cert-password-box" style="display:none">
+                    <div class="cert-password-label" data-i18n="certs.importPasswordLabel">导入密码（请立即保存）</div>
+                    <div class="cert-password-value">
+                        <code id="cert-password-text"></code>
+                        <button type="button" class="btn-icon" onclick="copyCertPassword()" data-i18n-title="common.copy" title="复制">
+                            <i class="fas fa-copy"></i>
+                        </button>
+                    </div>
+                    <small data-i18n="certs.importPasswordHint">导入证书时请输入此密码，泄露的配置文件无法在无密码的情况下使用</small>
+                </div>
                 
                 <div class="cert-instructions">
                     <h4 data-i18n="certs.installGuide">安装说明:</h4>
@@ -274,6 +300,66 @@
     background: #fff3e0;
     color: #ef6c00;
 }
+
+.validity-cell {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    align-items: flex-start;
+}
+
+.checkbox-label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    font-weight: 500;
+}
+
+.checkbox-label input[type="checkbox"] {
+    width: auto;
+    margin: 0;
+}
+
+.cert-password-box {
+    margin: 16px 0;
+    padding: 12px 16px;
+    border-radius: 8px;
+    background: #fff8e1;
+    border: 1px solid #ffe082;
+    text-align: left;
+}
+
+.cert-password-label {
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: #8d6e00;
+    margin-bottom: 8px;
+}
+
+.cert-password-value {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.cert-password-value code {
+    flex: 1;
+    padding: 8px 12px;
+    border-radius: 6px;
+    background: #ffffff;
+    border: 1px solid #ffe082;
+    font-size: 1rem;
+    letter-spacing: 1px;
+    word-break: break-all;
+}
+
+.cert-password-box small {
+    display: block;
+    margin-top: 8px;
+    color: #8d6e00;
+    font-size: 0.8125rem;
+}
 </style>
 {% endblock %}
 
@@ -284,13 +370,32 @@ let systemUsers = [];
 let currentCertData = null;
 let currentCertName = null;
 let currentBindingCert = null;
+let currentImportPassword = null;
+
+// Date-only formatter for certificate validity
+function formatDay(dateString) {
+    if (!dateString) return '-';
+    const date = new Date(dateString);
+    if (isNaN(date.getTime())) return dateString;
+    const locale = (window.i18n && window.i18n.getLanguage() === 'en') ? 'en-US' : 'zh-CN';
+    return date.toLocaleDateString(locale, { year: 'numeric', month: '2-digit', day: '2-digit' });
+}
+
+// Copy the one-time import password shown after generation
+function copyCertPassword() {
+    const text = document.getElementById('cert-password-text');
+    if (!text || !text.textContent) return;
+    navigator.clipboard.writeText(text.textContent)
+        .then(() => showToast(t('certs.passwordCopied'), 'success'))
+        .catch(() => showToast(t('common.failed'), 'error'));
+}
 
 // Load certificates
 async function loadCerts() {
     const tbody = document.querySelector('#certs-table tbody');
     tbody.innerHTML = `
         <tr class="loading-row">
-            <td colspan="5">
+            <td colspan="6">
                 <i class="fas fa-spinner fa-spin"></i>
                 ${t('common.loading')}
             </td>
@@ -347,6 +452,27 @@ function getBoundUser(certName) {
     return systemUsers.find(u => u.vpn_cert_name === certName);
 }
 
+// Render the certificate validity cell (expiry date + remaining days)
+function renderValidity(cert) {
+    if (cert.days_remaining === null || cert.days_remaining === undefined) {
+        return `<span class="text-muted">${t('certs.validityUnknown')}</span>`;
+    }
+    const days = cert.days_remaining;
+    let badgeClass = 'badge-success';
+    let label = `${days} ${t('certs.days')}`;
+    if (days < 0) {
+        badgeClass = 'badge-danger';
+        label = t('certs.expired');
+    } else if (days <= 30) {
+        badgeClass = 'badge-warning';
+    }
+    const dateText = cert.expires_at ? formatDay(cert.expires_at) : '';
+    return `<div class="validity-cell">
+        <span class="badge ${badgeClass}">${label}</span>
+        <small class="text-muted">${dateText}</small>
+    </div>`;
+}
+
 // Render certificates table
 function renderCerts() {
     const tbody = document.querySelector('#certs-table tbody');
@@ -354,7 +480,7 @@ function renderCerts() {
     if (certs.length === 0) {
         tbody.innerHTML = `
             <tr class="empty-row">
-                <td colspan="5">${t('certs.noCerts')}</td>
+                <td colspan="6">${t('certs.noCerts')}</td>
             </tr>
         `;
         return;
@@ -366,6 +492,7 @@ function renderCerts() {
             <tr>
                 <td>
                     <strong>${escapeHtml(cert.client_name)}</strong>
+                    ${cert.is_protected ? `<i class="fas fa-lock text-muted" title="${t('certs.protected')}"></i>` : ''}
                     ${cert.description ? `<br><small class="text-muted">${escapeHtml(cert.description)}</small>` : ''}
                 </td>
                 <td>
@@ -379,6 +506,7 @@ function renderCerts() {
                         ${cert.is_active ? t('common.active') : t('common.revoked')}
                     </span>
                 </td>
+                <td>${renderValidity(cert)}</td>
                 <td>${formatDate(cert.created_at)}</td>
                 <td>
                     <div class="cert-actions">
@@ -515,6 +643,8 @@ async function unbindCert() {
 // Open add cert modal
 async function openAddCertModal() {
     document.getElementById('add-cert-form').reset();
+    document.getElementById('cert-protect-config').checked = false;
+    document.getElementById('cert-password-wrap').style.display = 'none';
     await loadSystemUsers();
     
     // Populate select
@@ -546,6 +676,16 @@ document.getElementById('add-cert-form').addEventListener('submit', async (e) =>
     
     const certName = document.getElementById('cert-client-name').value.trim();
     const bindUserId = document.getElementById('cert-bind-user').value;
+    const protectConfig = document.getElementById('cert-protect-config').checked;
+    const configPassword = document.getElementById('cert-config-password').value.trim();
+
+    if (configPassword && !/^[A-Za-z0-9._@#%^*+=\-]{6,128}$/.test(configPassword)) {
+        showToast(t('certs.configPasswordInvalid'), 'error');
+        submitBtn.disabled = false;
+        spinner.style.display = 'none';
+        icon.style.display = 'inline-block';
+        return;
+    }
     
     try {
         // 1. Generate certificate
@@ -554,7 +694,9 @@ document.getElementById('add-cert-form').addEventListener('submit', async (e) =>
             headers: getAuthHeaders(),
             body: JSON.stringify({
                 client_name: certName,
-                description: document.getElementById('cert-description').value.trim()
+                description: document.getElementById('cert-description').value.trim(),
+                protect_config: protectConfig,
+                config_password: configPassword || null
             })
         });
         
@@ -566,6 +708,18 @@ document.getElementById('add-cert-form').addEventListener('submit', async (e) =>
         
         currentCertData = result.p12_data;
         currentCertName = certName;
+        currentImportPassword = result.import_password || null;
+
+        // Show the one-time import password if the config was protected
+        const pwBox = document.getElementById('cert-password-result');
+        const pwText = document.getElementById('cert-password-text');
+        if (currentImportPassword) {
+            pwText.textContent = currentImportPassword;
+            pwBox.style.display = 'block';
+        } else {
+            pwText.textContent = '';
+            pwBox.style.display = 'none';
+        }
         
         // 2. Bind to user if selected
         if (bindUserId) {
@@ -587,6 +741,14 @@ document.getElementById('add-cert-form').addEventListener('submit', async (e) =>
         submitBtn.disabled = false;
         spinner.style.display = 'none';
         icon.style.display = 'inline-block';
+    }
+});
+
+// Toggle the custom password field
+document.getElementById('cert-protect-config').addEventListener('change', (e) => {
+    document.getElementById('cert-password-wrap').style.display = e.target.checked ? 'block' : 'none';
+    if (!e.target.checked) {
+        document.getElementById('cert-config-password').value = '';
     }
 });
 
@@ -656,6 +818,11 @@ async function downloadCert(clientName, format) {
             URL.revokeObjectURL(link.href);
             
             showToast(t('certs.downloadSuccess', { filename: result.filename }), 'success');
+
+            // Protected configs need the import password when installing
+            if (result.is_protected && result.import_password) {
+                showToast(`${t('certs.importPasswordLabel')}: ${result.import_password}`, 'info');
+            }
         } else {
             throw new Error(result.message || t('users.downloadFailed'));
         }

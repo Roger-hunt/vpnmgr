@@ -20,6 +20,15 @@ class Settings(BaseSettings):
 
     # VPN client network (IKEv2 assigned subnet)
     vpn_subnet: str = "192.168.43.0/24"
+
+    # IKEv2 client config protection (optional)
+    # When enabled, exported .p12 / .mobileconfig / .sswan files require an
+    # import password. This defends against a leaked config file: an attacker
+    # holding the raw file cannot import it without the password.
+    protect_client_config: bool = False
+    # Fixed import password. Leave empty to let ikev2.sh generate a random one.
+    # Allowed characters: letters, digits, . _ @ # % ^ * + = -
+    client_config_password: str = ""
     
     # Database
     database_url: str = "sqlite+aiosqlite:///./data/vpnmgr.db"
