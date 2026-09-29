@@ -717,6 +717,19 @@ async def api_captive_status(request: Request):
     }
 
 
+@app.post("/api/captive/reset")
+async def api_captive_reset():
+    """Clear all captive portal authorizations (useful for testing)"""
+    count = len(_captive_authenticated_ips)
+    _captive_authenticated_ips.clear()
+    print(f"[CAPTIVE] Cleared {count} authorized IPs from memory")
+    return {
+        "success": True,
+        "cleared_count": count,
+        "message": f"Cleared {count} captive authorizations"
+    }
+
+
 # ========== OIDC / SSO Authentication Routes ==========
 
 def generate_pkce_pair():
