@@ -509,12 +509,18 @@
 
             // 动态使用服务端返回的内网探测目标，若未配置则跳过
             const lanIp = serverNetworkStatus && serverNetworkStatus.lan_ip ? serverNetworkStatus.lan_ip : '';
+            const lanPort = serverNetworkStatus && serverNetworkStatus.lan_port ? serverNetworkStatus.lan_port : 0;
             if (!lanIp) {
                 setSuccess('lan', '未配置内网探测目标 (可于环境变量配置)');
                 return true;
             }
 
-            const ports = [8354, 80, 443];
+            // 优先探测环境变量里配置的端口，再回退到常见端口
+            const ports = [];
+            if (lanPort > 0) ports.push(lanPort);
+            [8354, 80, 443].forEach(p => { if (!ports.includes(p)) ports.push(p); });
+
+            const target = (port) => `http://${lanIp}:${port}`;
 
             // 1. 尝试从浏览器直接发送请求
             for (const port of ports) {
@@ -522,14 +528,14 @@
                     const controller = new AbortController();
                     const timeoutId = setTimeout(() => controller.abort(), 3000);
 
-                    await fetch(`http://${lanIp}:${port}`, {
+                    await fetch(target(port), {
                         method: 'GET',
                         mode: 'no-cors',
                         signal: controller.signal
                     });
 
                     clearTimeout(timeoutId);
-                    setSuccess('lan', `可访问 (${lanIp})`);
+                    setSuccess('lan', `可访问 (${lanIp}:${port})`);
                     return true;
                 } catch (e) {
                     // 继续尝试下一个端口
@@ -539,12 +545,13 @@
 
             // 2. 如果浏览器直接连接失败（可能由于混合内容、CORS 或非 HTTP 服务等限制），
             // 则使用服务器端的 Socket 校验结果作为备份
+            const lanTarget = lanPort > 0 ? `${lanIp}:${lanPort}` : lanIp;
             if (serverNetworkStatus && serverNetworkStatus.lan_accessible) {
-                setSuccess('lan', `可访问 (服务器确认: ${lanIp})`);
+                setSuccess('lan', `可访问 (服务器确认: ${lanTarget})`);
                 return true;
             }
 
-            setError('lan', `不可访问 (${lanIp})`);
+            setError('lan', `不可访问 (${lanTarget})`);
             return false;
         }
 

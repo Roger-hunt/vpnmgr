@@ -77,7 +77,16 @@ VPN_CONTAINER_NAME=ipsec-vpn-server
 # 服务器设置
 HOST=0.0.0.0
 PORT=8080
+
+# 内网探测目标 (可选，用于诊断页验证 VPN 客户端能否访问内网)
+# 两项都填才生效；LAN_CHECK_HOST 留空则显示"未配置内网探测目标"
+LAN_CHECK_HOST=192.168.1.27
+LAN_CHECK_PORT=8081
 ```
+
+> **关于内网探测**：诊断页会先尝试从浏览器直接访问 `http://<LAN_CHECK_HOST>:<LAN_CHECK_PORT>`，
+> 失败时回退到服务端 TCP 探测。VPN 客户端访问**其他**内网主机走 NAT，因此对方看到的是
+> 容器的源地址；若目标主机有防火墙，需放行该地址。
 
 ## 使用说明
 

@@ -874,7 +874,8 @@ async def api_public_debug():
         "vpn_running": vpn_running,
         "internet_connected": internet_connected,
         "lan_accessible": lan_accessible,
-        "lan_ip": lan_host or ""
+        "lan_ip": lan_host or "",
+        "lan_port": lan_port if (lan_host and lan_port > 0) else 0
     }
 
 
