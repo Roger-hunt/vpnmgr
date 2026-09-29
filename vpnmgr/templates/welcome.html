@@ -456,7 +456,11 @@
             try {
                 const res = await fetch('/api/captive/complete', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' }
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        client_ip: '{{ real_ip }}',
+                        assigned_ip: '{{ assigned_ip or "" }}'
+                    })
                 });
                 const data = await res.json();
                 if (data.success) {

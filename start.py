@@ -156,21 +156,18 @@ def setup_vpn_network():
                 break
         
         if host_lan_ip:
-            # Specific rule: VPN clients → this host only, preserve source IP
-            check = subprocess.run(
+            # Specific rule: VPN clients → this host only, preserve source IP (always position 1)
+            subprocess.run(
                 ['docker', 'exec', VPN_CONTAINER_NAME, 'iptables', '-t', 'nat',
-                 '-C', 'POSTROUTING', '-s', VPN_SUBNET, '-d', f'{host_lan_ip}/32', '-j', 'RETURN'],
+                 '-D', 'POSTROUTING', '-s', VPN_SUBNET, '-d', f'{host_lan_ip}/32', '-j', 'RETURN'],
                 capture_output=True, check=False
             )
-            if check.returncode != 0:
-                subprocess.run(
-                    ['docker', 'exec', VPN_CONTAINER_NAME, 'iptables', '-t', 'nat',
-                     '-I', 'POSTROUTING', '1', '-s', VPN_SUBNET, '-d', f'{host_lan_ip}/32', '-j', 'RETURN'],
-                    capture_output=True, check=False
-                )
-                print(f"   ✓ NAT 排除: VPN→{host_lan_ip} 保留真实客户端IP")
-            else:
-                print(f"   ✓ NAT 排除规则已存在: VPN→{host_lan_ip}")
+            subprocess.run(
+                ['docker', 'exec', VPN_CONTAINER_NAME, 'iptables', '-t', 'nat',
+                 '-I', 'POSTROUTING', '1', '-s', VPN_SUBNET, '-d', f'{host_lan_ip}/32', '-j', 'RETURN'],
+                capture_output=True, check=False
+            )
+            print(f"   ✓ NAT 排除: VPN→{host_lan_ip} 保留真实客户端IP (已置于首位)")
         else:
             print(f"   ⚠️  无法确定宿主机LAN IP，跳过NAT排除设置")
         

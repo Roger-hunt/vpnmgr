@@ -257,6 +257,15 @@ async def sync_connection_history():
                 
                 # Remove disconnected sessions from tracking
                 for session_id in disconnected_sessions:
+                    sconn = _active_sessions.get(session_id, {})
+                    assigned_ip = sconn.get('assigned_ip')
+                    if assigned_ip and assigned_ip != '-':
+                        _captive_authenticated_ips.pop(assigned_ip, None)
+                        try:
+                            from .utils.captive_firewall import deauthorize_ip
+                            deauthorize_ip(assigned_ip)
+                        except Exception as e:
+                            print(f"[FIREWALL ERROR] Could not deauthorize {assigned_ip}: {e}")
                     del _active_sessions[session_id]
                 
         except Exception as e:
@@ -273,6 +282,14 @@ async def lifespan(app: FastAPI):
     print("✅ Database initialized")
     print(f"🚀 VPN Manager starting...")
     print(f"   Container: {settings.vpn_container_name}")
+    
+    # Initialize Captive Firewall Enforcement
+    try:
+        from .utils.captive_firewall import init_captive_firewall
+        init_captive_firewall()
+        print("🛡️ Captive portal firewall enforcement initialized")
+    except Exception as e:
+        print(f"[FIREWALL WARNING] Could not initialize firewall: {e}")
     
     # Clean up stale connections from previous runs
     await cleanup_stale_connections()
@@ -695,13 +712,68 @@ async def linux_firefox_captive_probe(request: Request):
 @app.post("/api/captive/complete")
 async def api_captive_complete(request: Request):
     """Authorize the client IP to access the Internet via captive portal"""
-    client_ip = get_real_client_ip(request)
-    set_ip_captive_authenticated(client_ip)
-    print(f"[CAPTIVE] Client IP '{client_ip}' successfully authorized for internet access")
+    candidate_ips = set()
+    req_ip = get_real_client_ip(request)
+    if req_ip and req_ip != "unknown":
+        candidate_ips.add(req_ip)
+        
+    try:
+        body = await request.json()
+        if isinstance(body, dict):
+            for k in ("client_ip", "assigned_ip", "ip"):
+                val = body.get(k)
+                if val and isinstance(val, str) and val != "unknown":
+                    candidate_ips.add(val.strip())
+    except Exception:
+        pass
+
+    vpn_status = vpn_manager.get_status()
+    active_conns = vpn_status.get("active_connections", [])
+    
+    authorized_vpn_ips = []
+    from .utils.captive_firewall import authorize_ip
+
+    for ip in list(candidate_ips):
+        set_ip_captive_authenticated(ip)
+        if is_valid_vpn_ip(ip):
+            try:
+                authorize_ip(ip)
+                authorized_vpn_ips.append(ip)
+                print(f"[FIREWALL] Unblocked internet traffic for VPN client: {ip}")
+            except Exception as e:
+                print(f"[FIREWALL ERROR] Failed to authorize IP {ip}: {e}")
+        else:
+            # Check if this IP matches an active connection's public client_ip
+            for conn in active_conns:
+                if conn.get("client_ip") == ip:
+                    assigned = conn.get("assigned_ip")
+                    if assigned and is_valid_vpn_ip(assigned):
+                        try:
+                            authorize_ip(assigned)
+                            set_ip_captive_authenticated(assigned)
+                            authorized_vpn_ips.append(assigned)
+                            print(f"[FIREWALL] Matched and unblocked VPN client: {assigned} (client: {ip})")
+                        except Exception as e:
+                            print(f"[FIREWALL ERROR] Failed to authorize assigned IP {assigned}: {e}")
+
+    # Fallback: if no VPN IP was authorized yet, but there is exactly 1 active VPN connection, authorize it
+    if not authorized_vpn_ips and len(active_conns) == 1:
+        single_assigned = active_conns[0].get("assigned_ip")
+        if single_assigned and is_valid_vpn_ip(single_assigned):
+            try:
+                authorize_ip(single_assigned)
+                set_ip_captive_authenticated(single_assigned)
+                authorized_vpn_ips.append(single_assigned)
+                print(f"[FIREWALL] Single connection fallback unblocked: {single_assigned}")
+            except Exception as e:
+                print(f"[FIREWALL ERROR] Single connection fallback failed: {e}")
+
+    print(f"[CAPTIVE] Client authorized. Request IP: {req_ip}, VPN IPs unblocked: {authorized_vpn_ips}")
     return {
         "success": True,
         "authenticated": True,
-        "ip": client_ip,
+        "ip": req_ip,
+        "authorized_vpn_ips": authorized_vpn_ips,
         "message": "Captive authentication successful"
     }
 
@@ -722,7 +794,14 @@ async def api_captive_reset():
     """Clear all captive portal authorizations (useful for testing)"""
     count = len(_captive_authenticated_ips)
     _captive_authenticated_ips.clear()
-    print(f"[CAPTIVE] Cleared {count} authorized IPs from memory")
+    
+    try:
+        from .utils.captive_firewall import reset_firewall
+        reset_firewall()
+    except Exception as e:
+        print(f"[FIREWALL ERROR] Reset firewall failed: {e}")
+        
+    print(f"[CAPTIVE] Cleared {count} authorized IPs from memory and firewall")
     return {
         "success": True,
         "cleared_count": count,
