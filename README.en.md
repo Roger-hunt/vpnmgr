@@ -113,16 +113,21 @@ Certificate management is integrated into the **Users** page — each user maps 
 
 1. Go to the **Users** page and add a user, or click Edit on an existing one.
 2. In the **IKEv2 Certificate** section, fill in the certificate name (or click **Auto-generate**).
-3. Optionally tick **Protect config files with an import password** and set a password (leave empty to auto-generate one).
-4. Click **Generate New Certificate**, then download the configuration file for your platform:
+3. Set **New certificate validity (months)**: 1-120, default 120 (10 years).
+   The `1y / 2y / 5y` buttons are shortcuts. **This applies only to the certificate issued now — existing ones are unaffected.**
+4. Optionally tick **Protect config files with an import password** and set a password (leave empty to auto-generate one).
+5. Click **Generate New Certificate**, then download the configuration file for your platform:
    - **iOS / macOS**: Download `.mobileconfig` or `.p12` and install via Settings.
    - **Android**: Download `.sswan` (for strongSwan VPN Client) or import `.p12`.
    - **Windows**: Import `.p12` into the "Personal" certificate store.
-5. The section shows the certificate's expiry date and remaining days.
+6. The section shows the certificate's expiry date and remaining days; expired or ≤30-day certificates are flagged red/amber.
 
 > With import-password protection enabled, every exported `.p12` / `.mobileconfig` / `.sswan`
 > requires that password to import. It is shown once at generation time — save it immediately.
 > Later downloads will display it again.
+
+> Validity is baked into the certificate by `ikev2.sh` at issuance time and cannot be changed
+> afterwards — re-issue to change it. Change the global default with `DEFAULT_CERT_VALIDITY_MONTHS`.
 
 **Revocation**: Click **Revoke** on any certificate to invalidate access immediately and unbind users.
 

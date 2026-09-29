@@ -126,6 +126,20 @@
                             <small data-i18n="users.certNameHint">建议使用 "用户名+VPN" 格式，如 zhangsan_vpn</small>
                         </div>
                         
+                        <!-- 新证书的有效期（仅对本次签发生效） -->
+                        <div class="form-group">
+                            <label for="cert-validity-months" data-i18n="certs.validityMonths">新证书有效期（月）</label>
+                            <div class="input-with-btn">
+                                <input type="number" id="cert-validity-months" min="1" max="120" step="1"
+                                       data-default="{{ default_validity_months|default(120) }}"
+                                       value="{{ default_validity_months|default(120) }}">
+                                <button type="button" class="btn-secondary" onclick="setCertValidity(12)">1<span data-i18n="certs.yearShort">年</span></button>
+                                <button type="button" class="btn-secondary" onclick="setCertValidity(24)">2<span data-i18n="certs.yearShort">年</span></button>
+                                <button type="button" class="btn-secondary" onclick="setCertValidity(60)">5<span data-i18n="certs.yearShort">年</span></button>
+                            </div>
+                            <small data-i18n="certs.validityMonthsHint">1-120 个月，默认 120（10 年）。仅对本次新签发的证书生效，已有证书不受影响</small>
+                        </div>
+                        
                         <!-- 已有证书时展示有效期与剩余天数 -->
                         <div class="form-group" id="cert-validity-row" style="display:none;">
                             <label data-i18n="certs.validity">有效期</label>
@@ -563,6 +577,18 @@ function resetCertProtectionUI() {
     hideImportPassword();
 }
 
+// Reset the new-certificate validity input back to the server default
+function resetCertValidityUI() {
+    const input = document.getElementById('cert-validity-months');
+    if (input) input.value = input.getAttribute('data-default') || '120';
+}
+
+// Quick preset buttons (1 / 2 / 5 years)
+function setCertValidity(months) {
+    const input = document.getElementById('cert-validity-months');
+    if (input) input.value = months;
+}
+
 // 弹窗是否处于打开状态（隐藏用 .modal{display:none}，打开时加 .show）
 function isModalOpen(modalId) {
     const modal = document.getElementById(modalId);
@@ -806,6 +832,7 @@ function openAddUserModal() {
     document.getElementById('cert-actions').style.display = 'none';
     document.getElementById('cert-validity-row').style.display = 'none';
     resetCertProtectionUI();
+    resetCertValidityUI();
     
     openModal('user-modal');
 }
@@ -841,6 +868,7 @@ function openEditUserModal(user) {
     
     // 有效期：先占位再异步取回，避免弹窗打开被阻塞
     resetCertProtectionUI();
+    resetCertValidityUI();
     const validityRow = document.getElementById('cert-validity-row');
     if (user.vpn_cert_name) {
         validityRow.style.display = 'block';
@@ -1000,6 +1028,21 @@ async function generateNewCert() {
     
     const protectConfig = document.getElementById('cert-protect-config').checked;
     const configPassword = document.getElementById('cert-config-password').value.trim();
+    const validityRaw = document.getElementById('cert-validity-months').value.trim();
+    
+    // 与服务端保持一致：1-120 的整数。空值交给服务端用默认值。
+    let validityMonths = null;
+    if (validityRaw !== '') {
+        if (!/^\d+$/.test(validityRaw)) {
+            showToast(t('certs.validityInvalid'), 'error');
+            return;
+        }
+        validityMonths = parseInt(validityRaw, 10);
+        if (validityMonths < 1 || validityMonths > 120) {
+            showToast(t('certs.validityInvalid'), 'error');
+            return;
+        }
+    }
     
     // 与服务端 validate_config_password 保持一致，提前拦截，避免拼 shell 时被注入
     if (configPassword && !/^[A-Za-z0-9._@#%^*+=\-]{6,128}$/.test(configPassword)) {
@@ -1019,7 +1062,8 @@ async function generateNewCert() {
                 client_name: certName,
                 description: `Certificate for user ${editingUser?.username || 'new user'}`,
                 protect_config: protectConfig,
-                config_password: configPassword || null
+                config_password: configPassword || null,
+                validity_months: validityMonths
             })
         });
         

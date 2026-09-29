@@ -53,6 +53,9 @@ class CertCreate(BaseModel):
     # protect_config=None falls back to the global setting.
     protect_config: Optional[bool] = None
     config_password: Optional[str] = Field(None, min_length=6, max_length=128)
+    # Certificate validity in months. ikev2.sh accepts 1-120 (120 = 10 years).
+    # None falls back to settings.default_cert_validity_months.
+    validity_months: Optional[int] = Field(None, ge=1, le=120)
 
 
 class CertResponse(BaseModel):

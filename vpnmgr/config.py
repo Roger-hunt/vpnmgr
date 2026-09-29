@@ -29,6 +29,11 @@ class Settings(BaseSettings):
     # Fixed import password. Leave empty to let ikev2.sh generate a random one.
     # Allowed characters: letters, digits, . _ @ # % ^ * + = -
     client_config_password: str = ""
+
+    # Default validity (in months) for newly issued IKEv2 client certificates.
+    # ikev2.sh accepts 1-120 (120 = 10 years, its own default). Can be overridden
+    # per certificate from the web UI.
+    default_cert_validity_months: int = 120
     
     # Database
     database_url: str = "sqlite+aiosqlite:///./data/vpnmgr.db"

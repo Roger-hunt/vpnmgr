@@ -12,20 +12,30 @@ from ..config import get_settings
 settings = get_settings()
 
 
+# Real-world shapes of the 'Not After' line:
+#   certutil -L -n <nick> : Not After : Wed Mar 19 07:51:09 2036
+#   openssl x509 -enddate : notAfter=Mar 19 07:51:09 2036 GMT
+# certutil prepends the weekday, openssl does not — hence the optional group.
+_EXPIRY_RE = re.compile(
+    r"not ?after\s*[=:]\s*"
+    r"(?:[A-Za-z]{3,9}\s+)?"                                 # optional weekday
+    r"([A-Za-z]{3}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2}\s+\d{4})"   # Mon DD HH:MM:SS YYYY
+    r"(?:\s+(?:GMT|UTC))?",                                  # optional zone
+    re.IGNORECASE,
+)
+
+
 def parse_cert_expiry(text: str) -> Optional[str]:
     """
     Parse a certificate 'Not After' line into an ISO timestamp.
 
-    Handles both formats:
-      openssl : notAfter=Jan  1 00:00:00 2028 GMT
-      certutil: Not After : Jan  1 00:00:00 2028 GMT
+    Handles both formats seen in practice:
+      certutil : Not After : Wed Mar 19 07:51:09 2036
+      openssl  : notAfter=Mar 19 07:51:09 2036 GMT
     """
     if not text:
         return None
-    match = re.search(
-        r"not ?after\s*[=:]\s*([A-Za-z]{3}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2}\s+\d{4})",
-        text, re.IGNORECASE
-    )
+    match = _EXPIRY_RE.search(text)
     if not match:
         return None
     normalized = " ".join(match.group(1).split())
@@ -621,18 +631,31 @@ class VPNManager:
         self,
         client_name: str,
         protect_config: Optional[bool] = None,
-        config_password: Optional[str] = None
+        config_password: Optional[str] = None,
+        validity_months: Optional[int] = None
     ) -> Tuple[bool, str, Optional[str], Optional[str]]:
         """
         Generate an IKEv2 certificate for a client.
 
         protect_config / config_password default to the global settings.
+        validity_months defaults to settings.default_cert_validity_months.
         Returns: (success, message, p12_content_base64, import_password)
         """
         if protect_config is None:
             protect_config = settings.protect_client_config
         if config_password is None:
             config_password = settings.client_config_password or ""
+
+        # ikev2.sh validates this itself and silently falls back to 120 on bad
+        # input, so reject it here instead of issuing a surprise 10-year cert.
+        if validity_months is None:
+            validity_months = settings.default_cert_validity_months
+        try:
+            validity_months = int(validity_months)
+        except (TypeError, ValueError):
+            return False, f"Invalid validity period: {validity_months!r}", None, None
+        if not 1 <= validity_months <= 120:
+            return False, "Validity must be an integer between 1 and 120 months", None, None
 
         ok, err = self.validate_config_password(config_password)
         if not ok:
@@ -652,6 +675,10 @@ class VPNManager:
         elif original_password:
             self._write_config_password("")
             restore_after = original_password
+
+        # VPN_CLIENT_VALIDITY is read by check_and_set_client_validity() on the
+        # --addclient path (no interactive prompt involved).
+        env_prefix = f"VPN_CLIENT_VALIDITY={validity_months} " + env_prefix
 
         try:
             exit_code, stdout, stderr = self.exec_command([

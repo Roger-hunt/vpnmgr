@@ -727,7 +727,12 @@ async def public_debug_page(request: Request):
 @app.get("/users", response_class=HTMLResponse)
 async def users_page(request: Request, user: str = Depends(require_auth)):
     """Users management page"""
-    return templates.TemplateResponse("users.html", {"request": request, "user": user})
+    return templates.TemplateResponse("users.html", {
+        "request": request,
+        "user": user,
+        # Prefill the "new certificate validity" input from the server default
+        "default_validity_months": settings.default_cert_validity_months,
+    })
 
 
 @app.get("/logs", response_class=HTMLResponse)
@@ -1102,7 +1107,8 @@ async def api_create_cert(
     success, message, p12_data, import_password = vpn_manager.generate_ikev2_cert(
         data.client_name,
         protect_config=data.protect_config,
-        config_password=data.config_password
+        config_password=data.config_password,
+        validity_months=data.validity_months
     )
     if not success:
         raise HTTPException(
