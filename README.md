@@ -1,19 +1,26 @@
 # VPN Manager
 
-一个基于 Web 的 docker-ipsec-vpn-server 管理面板，支持用户管理、IKEv2 证书管理和实时状态监控。
+一个基于 Web 的 docker-ipsec-vpn-server 管理面板，支持用户管理、IKEv2 证书全生命周期管理（生成、下载、注销）和实时状态监控。
+
+<p align="right">
+  <b>简体中文</b> | <a href="./README.en.md">English</a>
+</p>
 
 ![Python](https://img.shields.io/badge/Python-3.11+-blue.svg)
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.109+-green.svg)
 ![Docker](https://img.shields.io/badge/Docker-compatible-blue.svg)
+![License](https://img.shields.io/badge/License-MIT-green.svg)
 
 ## 功能特性
 
-- 🔐 **用户管理** - 添加、删除、修改 VPN 用户密码
-- 📜 **证书管理** - 生成和撤销 IKEv2 证书 (.p12)
-- 📊 **实时监控** - WebSocket 实时显示连接状态
-- 📝 **日志查看** - 查看 VPN 容器日志
-- 🔒 **安全认证** - JWT + Session 双认证机制
-- 📱 **响应式设计** - 支持桌面和移动设备
+- 🔐 **用户管理** - 添加、删除、修改 VPN 用户密码及配额
+- 📜 **证书管理** - 生成、下载及彻底注销 IKEv2 证书 (.p12, .mobileconfig, .sswan)
+- 🌐 **多语言支持** - 内置中英文一键无缝即时切换 (English / 简体中文)
+- 📊 **实时监控** - WebSocket 毫秒级展示活跃连接、流量与容器健康状态
+- 📝 **日志查看** - 实时查看与追踪 VPN 容器运行日志
+- 🔒 **安全认证** - JWT + Session 双重会话鉴权
+- 📱 **响应式设计** - 移动端自适应，UI 现代大气
+- 🗄️ **持久化存储** - SQLite 数据库规范归档于 `./data/vpnmgr.db`，支持数据卷持久化
 
 ## 快速开始
 
@@ -104,26 +111,35 @@ PORT=8080
 
 ```
 vpnmgr/
-├── vpnmgr/
-│   ├── main.py              # FastAPI 主应用
-│   ├── config.py            # 配置管理
-│   ├── schemas.py           # Pydantic 模型
-│   ├── models/              # 数据库模型
-│   │   ├── database.py
-│   │   ├── vpn_user.py
-│   │   └── ikev2_cert.py
+├── data/                    # 数据库持久化存储目录
+│   ├── .gitkeep
+│   └── vpnmgr.db            # SQLite 数据库
+├── vpnmgr/                  # 核心应用包
+│   ├── main.py              # FastAPI 核心服务与 API 路由
+│   ├── config.py            # 应用设置与环境变量加载
+│   ├── schemas.py           # Pydantic 数据验证模型
+│   ├── models/              # SQLAlchemy 数据库模型
+│   │   ├── database.py      # 异步数据库引擎与自动平滑迁移
+│   │   ├── vpn_user.py      # VPN 账号模型
+│   │   ├── ikev2_cert.py    # IKEv2 证书模型
+│   │   └── system_user.py   # 管理员用户模型
 │   ├── utils/               # 工具模块
-│   │   ├── vpn_manager.py   # Docker 容器管理
-│   │   └── auth.py          # 认证工具
-│   ├── templates/           # HTML 模板
-│   └── static/              # 静态文件
-│       ├── css/
+│   │   ├── vpn_manager.py   # Docker 与 strongSwan 命令交互
+│   │   └── auth.py          # 密码哈希与 JWT 认证
+│   ├── templates/           # Jinja2 HTML 模板
+│   └── static/              # 静态资源
+│       ├── css/             # 样式文件 (modern.css / style.css)
 │       └── js/
-├── requirements.txt
-├── docker-compose.yml
-├── Dockerfile
-├── start.py
-└── README.md
+│           ├── app.js       # 控制台交互与 WebSocket 客户端
+│           └── i18n.js      # 中英文多语言字典
+├── scripts/                 # 网络配置与运维脚本
+├── requirements.txt         # Python 依赖
+├── docker-compose.yml       # Docker 编排配置
+├── Dockerfile               # 容器构建镜像定义
+├── ecosystem.config.js      # PM2 生产进程管理配置
+├── start.py                 # 应用启动入口
+├── README.md                # 中文文档
+└── README.en.md             # 英文文档
 ```
 
 ## 与 VPN 容器通信
