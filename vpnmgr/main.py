@@ -196,6 +196,18 @@ async def sync_connection_history():
                             await db.commit()
                             _active_sessions[session_id] = conn
                             print(f"[SYNC] Saved connection: {session_id} with IP {assigned_ip}")
+                            
+                            # Auto-authorize VPN clients with bound system accounts
+                            # (Android VPN connections don't trigger captive portal popups,
+                            #  so we auto-whitelist trusted certificates)
+                            if system_user and assigned_ip and assigned_ip != '-':
+                                try:
+                                    set_ip_captive_authenticated(assigned_ip)
+                                    from .utils.captive_firewall import authorize_ip
+                                    authorize_ip(assigned_ip)
+                                    print(f"[AUTO-AUTH] Auto-authorized {assigned_ip} for bound user '{bound_username}' (cert: {cert_name})")
+                                except Exception as fw_err:
+                                    print(f"[AUTO-AUTH ERROR] Failed to auto-authorize {assigned_ip}: {fw_err}")
                         except Exception as e:
                             print(f"[SYNC ERROR] Failed to save connection: {e}")
                             import traceback
