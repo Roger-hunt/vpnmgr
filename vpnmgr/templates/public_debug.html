@@ -504,6 +504,10 @@
         }
 
         // 检测内网服务器（从浏览器端）
+        // 注意：本页是公开页面（无需登录），所以只输出"可访问 / 不可访问"，
+        // 任何情况下都不把探测目标的 IP / 端口渲染成页面文本。
+        // 目标地址仍由 /api/public-debug 下发 —— 浏览器要主动发请求就必须知道
+        // 目标是什么，这一点无法回避，因此属于"不显示"而非"保密"。
         async function checkLAN() {
             setPending('lan');
 
@@ -520,22 +524,20 @@
             if (lanPort > 0) ports.push(lanPort);
             [8354, 80, 443].forEach(p => { if (!ports.includes(p)) ports.push(p); });
 
-            const target = (port) => `http://${lanIp}:${port}`;
-
-            // 1. 尝试从浏览器直接发送请求
+            // 1. 尝试从浏览器直接发送请求（结果只用于判定可达性，不回显地址）
             for (const port of ports) {
                 try {
                     const controller = new AbortController();
                     const timeoutId = setTimeout(() => controller.abort(), 3000);
 
-                    await fetch(target(port), {
+                    await fetch(`http://${lanIp}:${port}`, {
                         method: 'GET',
                         mode: 'no-cors',
                         signal: controller.signal
                     });
 
                     clearTimeout(timeoutId);
-                    setSuccess('lan', `可访问 (${lanIp}:${port})`);
+                    setSuccess('lan', '可访问');
                     return true;
                 } catch (e) {
                     // 继续尝试下一个端口
@@ -545,13 +547,12 @@
 
             // 2. 如果浏览器直接连接失败（可能由于混合内容、CORS 或非 HTTP 服务等限制），
             // 则使用服务器端的 Socket 校验结果作为备份
-            const lanTarget = lanPort > 0 ? `${lanIp}:${lanPort}` : lanIp;
             if (serverNetworkStatus && serverNetworkStatus.lan_accessible) {
-                setSuccess('lan', `可访问 (服务器确认: ${lanTarget})`);
+                setSuccess('lan', '可访问（服务器确认）');
                 return true;
             }
 
-            setError('lan', `不可访问 (${lanTarget})`);
+            setError('lan', '不可访问');
             return false;
         }
 

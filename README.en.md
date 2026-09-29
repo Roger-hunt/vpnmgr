@@ -99,6 +99,17 @@ LAN_CHECK_HOST=
 LAN_CHECK_PORT=0
 ```
 
+> **About the LAN probe**: the diagnostics page first tries to reach
+> `http://<LAN_CHECK_HOST>:<LAN_CHECK_PORT>` straight from the browser, and falls back to a
+> server-side TCP probe. VPN clients reaching **other** LAN hosts go through NAT, so those hosts
+> see the container's source address — allow it in their firewall if needed.
+>
+> **About address visibility**: `/public-debug` is a public page (no login required), so it only
+> prints "reachable / unreachable" and never renders the probe target's IP or port as text.
+> The `/api/public-debug` endpoint does still return that address, because a browser-side probe
+> cannot work without knowing its target. Treat the value as **obscured, not secret** — do not
+> put a genuinely sensitive internal address here.
+
 ---
 
 ## 📖 Usage Guide

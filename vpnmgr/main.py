@@ -862,10 +862,11 @@ async def api_public_debug():
                 print(f"[DEBUG] HTTP check error: {e2}")
     
     # Check LAN server (if configured via LAN_CHECK_HOST and LAN_CHECK_PORT)
-    lan_accessible = False
     lan_host = settings.lan_check_host
     lan_port = settings.lan_check_port
-    if lan_host and lan_port > 0:
+    lan_configured = bool(lan_host and lan_port > 0)
+    lan_accessible = False
+    if lan_configured:
         try:
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.settimeout(2)
@@ -875,12 +876,18 @@ async def api_public_debug():
         except Exception as e:
             print(f"[DEBUG] LAN check error: {e}")
     
+    # SECURITY NOTE: this endpoint is public (no auth) and it DOES return the
+    # probe target address. That is unavoidable — the browser-side reachability
+    # probe in public_debug.html has to know which host:port to request, so the
+    # address must reach the client one way or another. The mitigation is on the
+    # rendering side only: the page never prints the address as visible text,
+    # it only shows 可访问 / 不可访问. Treat the target as "obscured, not secret".
     return {
         "vpn_running": vpn_running,
         "internet_connected": internet_connected,
         "lan_accessible": lan_accessible,
         "lan_ip": lan_host or "",
-        "lan_port": lan_port if (lan_host and lan_port > 0) else 0
+        "lan_port": lan_port if lan_configured else 0
     }
 
 
