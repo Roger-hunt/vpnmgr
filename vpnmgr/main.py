@@ -730,12 +730,6 @@ async def users_page(request: Request, user: str = Depends(require_auth)):
     return templates.TemplateResponse("users.html", {"request": request, "user": user})
 
 
-@app.get("/certs")
-async def certs_redirect():
-    """Redirect to users page (cert management integrated into user management)"""
-    return RedirectResponse(url="/users", status_code=301)
-
-
 @app.get("/logs", response_class=HTMLResponse)
 async def logs_page(request: Request, user: str = Depends(require_auth)):
     """Logs page"""

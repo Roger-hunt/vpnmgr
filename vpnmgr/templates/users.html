@@ -126,6 +126,40 @@
                             <small data-i18n="users.certNameHint">建议使用 "用户名+VPN" 格式，如 zhangsan_vpn</small>
                         </div>
                         
+                        <!-- 已有证书时展示有效期与剩余天数 -->
+                        <div class="form-group" id="cert-validity-row" style="display:none;">
+                            <label data-i18n="certs.validity">有效期</label>
+                            <div id="cert-validity"></div>
+                        </div>
+                        
+                        <!-- 生成新证书时的导入密码保护（可选） -->
+                        <div class="form-group">
+                            <label class="checkbox-label" for="cert-protect-config">
+                                <input type="checkbox" id="cert-protect-config">
+                                <span data-i18n="certs.protectConfig">使用导入密码保护配置文件</span>
+                            </label>
+                            <small data-i18n="certs.protectConfigHint">开启后导出的 .p12 / .mobileconfig / .sswan 需要密码才能导入，可避免配置文件泄露后被直接使用</small>
+                            <div id="cert-password-wrap" style="display:none;margin-top:8px">
+                                <input type="text" id="cert-config-password" maxlength="128" autocomplete="new-password"
+                                       data-i18n-placeholder="certs.configPasswordPlaceholder"
+                                       placeholder="留空则自动生成随机密码">
+                                <small data-i18n="certs.configPasswordHint">可用字符：字母、数字与 . _ @ # % ^ * + = - ，长度 6-128 位</small>
+                            </div>
+                        </div>
+                        
+                        <!-- 生成/下载后展示导入密码 -->
+                        <div id="cert-password-result" class="cert-password-box" style="display:none">
+                            <div class="cert-password-label" data-i18n="certs.importPasswordLabel">导入密码（请立即保存）</div>
+                            <div class="cert-password-value">
+                                <code id="cert-password-text"></code>
+                                <button type="button" class="btn-icon" onclick="copyCertPassword()"
+                                        data-i18n-title="common.copy" title="复制">
+                                    <i class="fas fa-copy"></i>
+                                </button>
+                            </div>
+                            <small data-i18n="certs.importPasswordHint">导入证书时请输入此密码，泄露的配置文件无法在无密码的情况下使用</small>
+                        </div>
+                        
                         <div id="cert-actions" style="display:none; margin-top: 10px;">
                             <button type="button" class="btn btn-success btn-sm" onclick="generateNewCert()">
                                 <i class="fas fa-certificate"></i> <span data-i18n="users.generateNewCert">生成新证书</span>
@@ -371,6 +405,90 @@
     from { transform: rotate(0deg); }
     to { transform: rotate(360deg); }
 }
+
+/* Certificate validity + import-password UI (inside the user modal) */
+.validity-cell {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    align-items: flex-start;
+}
+
+.validity-protected {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 6px;
+    font-size: 0.8125rem;
+    color: #8d6e00;
+}
+
+.checkbox-label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    font-weight: 500;
+}
+
+.checkbox-label input[type="checkbox"] {
+    width: auto;
+    margin: 0;
+}
+
+.cert-password-box {
+    margin: 12px 0;
+    padding: 12px 16px;
+    border-radius: 8px;
+    background: #fff8e1;
+    border: 1px solid #ffe082;
+    text-align: left;
+}
+
+.cert-password-label {
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: #8d6e00;
+    margin-bottom: 8px;
+}
+
+.cert-password-value {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.cert-password-value code {
+    flex: 1;
+    padding: 8px 12px;
+    border-radius: 6px;
+    background: #ffffff;
+    border: 1px solid #ffe082;
+    font-size: 1rem;
+    letter-spacing: 1px;
+    word-break: break-all;
+}
+
+.cert-password-box small {
+    display: block;
+    margin-top: 8px;
+    color: #8d6e00;
+    font-size: 0.8125rem;
+}
+
+.cert-password-value .btn-icon {
+    flex: 0 0 auto;
+    padding: 8px 10px;
+    border: 1px solid #ffe082;
+    border-radius: 6px;
+    background: #ffffff;
+    color: #8d6e00;
+    cursor: pointer;
+}
+
+.cert-password-value .btn-icon:hover {
+    background: #fff3cd;
+}
 </style>
 {% endblock %}
 
@@ -379,6 +497,146 @@
 let users = [];
 let activeConnections = [];
 let editingUser = null;
+
+// Date-only formatter for certificate validity
+function formatDay(dateString) {
+    if (!dateString) return '-';
+    const date = new Date(dateString);
+    if (isNaN(date.getTime())) return dateString;
+    const locale = (window.i18n && window.i18n.getLanguage() === 'en') ? 'en-US' : 'zh-CN';
+    return date.toLocaleDateString(locale, { year: 'numeric', month: '2-digit', day: '2-digit' });
+}
+
+// Fetch the certificate matching certName (validity / protection flags)
+async function loadCertInfo(certName) {
+    if (!certName) return null;
+    try {
+        const response = await fetch('/api/certs', { headers: getAuthHeaders() });
+        if (!response.ok) return null;
+        const list = await response.json();
+        return (list || []).find(c => c.client_name === certName) || null;
+    } catch (error) {
+        return null;
+    }
+}
+
+// Render expiry date + remaining-days badge for the user's certificate
+function renderCertValidity(cert) {
+    const box = document.getElementById('cert-validity');
+    if (!box) return;
+
+    let html = '';
+    const days = cert ? cert.days_remaining : null;
+    if (days === null || days === undefined) {
+        html += `<span class="text-muted">${t('certs.validityUnknown')}</span>`;
+    } else {
+        let badgeClass = 'badge-success';
+        let label = `${days} ${t('certs.days')}`;
+        if (days < 0) {
+            badgeClass = 'badge-danger';
+            label = t('certs.expired');
+        } else if (days <= 30) {
+            badgeClass = 'badge-warning';
+        }
+        const dateText = cert.expires_at ? formatDay(cert.expires_at) : '';
+        html += `<div class="validity-cell">
+            <span class="badge ${badgeClass}">${label}</span>
+            <small class="text-muted">${dateText}</small>
+        </div>`;
+    }
+
+    if (cert && cert.is_protected) {
+        html += `<div class="validity-protected"><i class="fas fa-lock"></i> ${t('certs.protected')}</div>`;
+    }
+
+    box.innerHTML = html;
+}
+
+// Reset the optional import-password controls
+function resetCertProtectionUI() {
+    const checkbox = document.getElementById('cert-protect-config');
+    if (checkbox) checkbox.checked = false;
+    const wrap = document.getElementById('cert-password-wrap');
+    if (wrap) wrap.style.display = 'none';
+    const input = document.getElementById('cert-config-password');
+    if (input) input.value = '';
+    hideImportPassword();
+}
+
+// 弹窗是否处于打开状态（隐藏用 .modal{display:none}，打开时加 .show）
+function isModalOpen(modalId) {
+    const modal = document.getElementById(modalId);
+    return !!(modal && modal.classList.contains('show'));
+}
+
+// 把导入密码展示到当前打开的弹窗里。
+// 编辑弹窗和详情弹窗各有一个容器，且下载入口两处都有，所以按弹窗状态择一。
+function showImportPassword(password) {
+    const value = password || '';
+    let shown = false;
+
+    // 1) 用户编辑弹窗里的固定密码框
+    if (isModalOpen('user-modal')) {
+        const box = document.getElementById('cert-password-result');
+        const text = document.getElementById('cert-password-text');
+        if (box && text) {
+            text.textContent = value;
+            box.style.display = 'block';
+            shown = true;
+        }
+    }
+
+    // 2) 用户详情弹窗里的容器（内容动态渲染，需自行拼装）
+    //    这里用的是「下载时提示」，与编辑弹窗里生成后的说明不同：
+    //    详情页下载的用户并没有刚看过密码，需要提示密码从何而来。
+    if (isModalOpen('user-detail-modal')) {
+        const detailBox = document.getElementById('detail-cert-password');
+        if (detailBox) {
+            detailBox.innerHTML = `
+                <div class="cert-password-label">${t('certs.importPasswordLabel')}</div>
+                <div class="cert-password-value"><code>${escapeHtml(value)}</code></div>
+                <small>${t('certs.downloadProtectedHint')}</small>
+            `;
+            detailBox.style.display = 'block';
+            shown = true;
+        }
+    }
+
+    // 3) 两个弹窗都没开时退回原生弹窗，避免密码静默丢失
+    if (!shown) {
+        window.alert(`${t('certs.importPasswordLabel')}\n\n${value}`);
+    }
+    return shown;
+}
+
+function hideImportPassword() {
+    const box = document.getElementById('cert-password-result');
+    const text = document.getElementById('cert-password-text');
+    if (box) box.style.display = 'none';
+    if (text) text.textContent = '';
+
+    const detailBox = document.getElementById('detail-cert-password');
+    if (detailBox) {
+        detailBox.style.display = 'none';
+        detailBox.innerHTML = '';
+    }
+}
+
+function copyCertPassword() {
+    const text = document.getElementById('cert-password-text');
+    if (!text || !text.textContent) return;
+    navigator.clipboard.writeText(text.textContent)
+        .then(() => showToast(t('certs.passwordCopied'), 'success'))
+        .catch(() => showToast(t('common.failed'), 'error'));
+}
+
+// Toggle the custom import-password field
+document.getElementById('cert-protect-config').addEventListener('change', (e) => {
+    document.getElementById('cert-password-wrap').style.display = e.target.checked ? 'block' : 'none';
+    if (!e.target.checked) {
+        document.getElementById('cert-config-password').value = '';
+    }
+});
 
 // Load users
 async function loadUsers() {
@@ -546,6 +804,8 @@ function openAddUserModal() {
     document.getElementById('vpn-user-status').textContent = t('common.notConfigured');
     document.getElementById('vpn-user-status').className = 'status-badge';
     document.getElementById('cert-actions').style.display = 'none';
+    document.getElementById('cert-validity-row').style.display = 'none';
+    resetCertProtectionUI();
     
     openModal('user-modal');
 }
@@ -577,6 +837,21 @@ function openEditUserModal(user) {
         document.getElementById('cert-status').textContent = t('common.notConfigured');
         document.getElementById('cert-status').className = 'status-badge';
         document.getElementById('cert-actions').style.display = 'none';
+    }
+    
+    // 有效期：先占位再异步取回，避免弹窗打开被阻塞
+    resetCertProtectionUI();
+    const validityRow = document.getElementById('cert-validity-row');
+    if (user.vpn_cert_name) {
+        validityRow.style.display = 'block';
+        document.getElementById('cert-validity').innerHTML =
+            `<span class="text-muted"><i class="fas fa-spinner fa-spin"></i></span>`;
+        loadCertInfo(user.vpn_cert_name).then(info => {
+            // 弹窗可能已被关闭或切到别的用户，避免回填错数据
+            if (editingUser === user) renderCertValidity(info);
+        });
+    } else {
+        validityRow.style.display = 'none';
     }
     
     if (user.vpn_username) {
@@ -673,6 +948,8 @@ async function viewUserDetail(user) {
                         <i class="fab fa-apple"></i> ${t('users.downloadCertProfile')}
                     </button>
                 </div>
+                <!-- 下载受保护证书时就地展示导入密码 -->
+                <div id="detail-cert-password" class="cert-password-box" style="display:none"></div>
             </div>
         `;
     }
@@ -721,6 +998,15 @@ async function generateNewCert() {
         return;
     }
     
+    const protectConfig = document.getElementById('cert-protect-config').checked;
+    const configPassword = document.getElementById('cert-config-password').value.trim();
+    
+    // 与服务端 validate_config_password 保持一致，提前拦截，避免拼 shell 时被注入
+    if (configPassword && !/^[A-Za-z0-9._@#%^*+=\-]{6,128}$/.test(configPassword)) {
+        showToast(t('certs.configPasswordInvalid'), 'error');
+        return;
+    }
+    
     if (!confirm(t('users.generateCertConfirm', { certName }))) {
         return;
     }
@@ -731,7 +1017,9 @@ async function generateNewCert() {
             headers: getAuthHeaders(),
             body: JSON.stringify({
                 client_name: certName,
-                description: `Certificate for user ${editingUser?.username || 'new user'}`
+                description: `Certificate for user ${editingUser?.username || 'new user'}`,
+                protect_config: protectConfig,
+                config_password: configPassword || null
             })
         });
         
@@ -748,6 +1036,17 @@ async function generateNewCert() {
                 name: certName,
                 data: result.p12_data
             };
+            
+            // 受保护时展示一次性导入密码
+            if (result.import_password) {
+                showImportPassword(result.import_password);
+            } else {
+                hideImportPassword();
+            }
+            
+            // 刷新有效期展示
+            document.getElementById('cert-validity-row').style.display = 'block';
+            loadCertInfo(certName).then(info => renderCertValidity(info));
         } else {
             showToast(result.message || t('common.failed'), 'error');
         }
@@ -809,6 +1108,14 @@ async function downloadCertForUser(certName, format = 'p12') {
             URL.revokeObjectURL(link.href);
             
             showToast(t('common.success'), 'success');
+            
+            // 受保护的证书导出时需要密码，直接展示给用户
+            // 注意：showToast 只区分 success/其他，'info' 会渲染成叉号，故此处不加 toast
+            if (result.import_password) {
+                showImportPassword(result.import_password);
+            } else {
+                hideImportPassword();
+            }
         }
     } catch (error) {
         showToast(t('users.downloadFailed') + ': ' + error.message, 'error');

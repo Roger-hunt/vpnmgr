@@ -109,13 +109,22 @@ LAN_CHECK_PORT=0
 3. Click Save. The user credentials become active immediately in the VPN container.
 
 ### 2. Issuing & Revoking IKEv2 Certificates
-1. Go to the **Certificates** page (`/certs`).
-2. Click **Generate Certificate**, input the client identifier (e.g. `iPhone-Alice`).
-3. Download the configuration file for your platform:
+Certificate management is integrated into the **Users** page — each user maps to one VPN identity.
+
+1. Go to the **Users** page and add a user, or click Edit on an existing one.
+2. In the **IKEv2 Certificate** section, fill in the certificate name (or click **Auto-generate**).
+3. Optionally tick **Protect config files with an import password** and set a password (leave empty to auto-generate one).
+4. Click **Generate New Certificate**, then download the configuration file for your platform:
    - **iOS / macOS**: Download `.mobileconfig` or `.p12` and install via Settings.
    - **Android**: Download `.sswan` (for strongSwan VPN Client) or import `.p12`.
    - **Windows**: Import `.p12` into the "Personal" certificate store.
-4. **Revocation**: Click **Revoke** on any certificate to invalidate access immediately and unbind users.
+5. The section shows the certificate's expiry date and remaining days.
+
+> With import-password protection enabled, every exported `.p12` / `.mobileconfig` / `.sswan`
+> requires that password to import. It is shown once at generation time — save it immediately.
+> Later downloads will display it again.
+
+**Revocation**: Click **Revoke** on any certificate to invalidate access immediately and unbind users.
 
 ### 3. Real-time Monitoring & Dashboard
 The **Dashboard** (`/`) connects via WebSocket to provide live status:
