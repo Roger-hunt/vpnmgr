@@ -79,13 +79,22 @@ def ensure_open_forwarding() -> bool:
         logger.warning("[FORWARD] vpn_subnet not configured, skipping")
         return False
 
-    rule = [CHAIN, "-s", VPN_SUBNET, "-o", "eth0"]
+    # NOTE: do NOT include CHAIN in `rule`. `rule` is passed to _iptables, which
+    # prepends `iptables` and is later given the chain name separately (e.g.
+    # `-D FORWARD <rule>` / `-I FORWARD <idx> <rule>`). Putting CHAIN inside the
+    # rule produced `iptables -I FORWARD 7 FORWARD -s ...` -> "Bad argument
+    # 'FORWARD'", so the egress ACCEPT was never inserted and VPN clients (IKEv2,
+    # which uses no ppp interface) had their traffic dropped by the chain's tail
+    # DROP rule. This is what kept them from reaching the internet/LAN.
+    rule = ["-s", VPN_SUBNET, "-o", "eth0"]
 
     # 1. Drop legacy captive jumps and any stale duplicate ACCEPT rules
     _remove_all(rule + ["-j", LEGACY_CHAIN])
     _remove_all(rule + ["-j", "ACCEPT"])
 
-    # 2. Insert a single ACCEPT ahead of the generic DROP rule
+    # 2. Insert a single ACCEPT ahead of the generic DROP rule. This is
+    # source-interface-agnostic: IKEv2 clients arrive decrypted with a
+    # 192.168.43.0/24 source and egress eth0, with no ppp interface involved.
     drop_idx = _find_drop_index()
     if drop_idx:
         ok, _, err = _iptables(["-I", CHAIN, str(drop_idx)] + rule + ["-j", "ACCEPT"])
